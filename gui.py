@@ -125,65 +125,74 @@ class AddProfileDialog(QDialog):
 
 
 class ProfileWidget(QGroupBox):
-    def __init__(self, profile, parent_window):
-        super().__init__(profile["name"])
-        self.profile = profile
-        self.parent_window = parent_window
-        self.sync = ProfileSync(profile)
+	def __init__(self, profile, parent_window):
+		super().__init__(profile["name"])
+		self.profile = profile
+		self.parent_window = parent_window
+		self.sync = ProfileSync(profile)
 
-        layout = QVBoxLayout()
+		layout = QVBoxLayout()
 
-        # Ground truth
-        ground = next(
-            p["path"] for p in profile["paths"] if p["role"] == "ground"
-        )
-        ground_label = QLabel(f"Ground: {ground}")
-        layout.addWidget(ground_label)
+		# Ground truth
+		ground = next(
+			p["path"] for p in profile["paths"] if p["role"] == "ground"
+		)
+		ground_label = QLabel(f"Ground: {ground}")
+		layout.addWidget(ground_label)
 
-        # Mirrors
-        mirrors = [
-            p["path"] for p in profile["paths"] if p["role"] == "mirror"
-        ]
-        for m in mirrors:
-            layout.addWidget(QLabel(f"Mirror: {m}"))
+		# Mirrors with status
+		self.mirror_labels = {}
+		mirrors = [
+			p["path"] for p in profile["paths"] if p["role"] == "mirror"
+		]
+		for m in mirrors:
+			lbl = QLabel(f"{m} : IDLE")
+			self.mirror_labels[m] = lbl
+			layout.addWidget(lbl)
 
-        # Status
-        self.status = QLabel("Status: IDLE")
-        layout.addWidget(self.status)
 
-        # Buttons
-        btn_row = QHBoxLayout()
+		# Status
+		self.status = QLabel("Status: IDLE")
+		layout.addWidget(self.status)
 
-        self.sync_btn = QPushButton("Sync")
-        self.sync_btn.clicked.connect(self.toggle_sync)
-        btn_row.addWidget(self.sync_btn)
+		# Buttons
+		btn_row = QHBoxLayout()
 
-        self.edit_btn = QPushButton("Edit")
-        self.edit_btn.clicked.connect(self.edit_profile)
-        btn_row.addWidget(self.edit_btn)
+		self.sync_btn = QPushButton("Sync")
+		self.sync_btn.clicked.connect(self.toggle_sync)
+		btn_row.addWidget(self.sync_btn)
 
-        layout.addLayout(btn_row)
-        self.setLayout(layout)
+		self.edit_btn = QPushButton("Edit")
+		self.edit_btn.clicked.connect(self.edit_profile)
+		btn_row.addWidget(self.edit_btn)
 
-        self.is_running = False
+		layout.addLayout(btn_row)
+		self.setLayout(layout)
 
-    def update_status(self, text):
-        self.status.setText(f"Status: {text}")
+		self.is_running = False
 
-    def toggle_sync(self):
-        if not self.is_running:
-            # Start sync
-            self.sync.start(self.update_status)
-            self.sync_btn.setText("Stop")
-            self.is_running = True
-        else:
-            # Stop sync
-            self.sync.stop(self.update_status)
-            self.sync_btn.setText("Sync")
-            self.is_running = False
+	def update_mirror_status(self, path, text):
+		if path in self.mirror_labels:
+			self.mirror_labels[path].setText(f"{path} : {text}")
 
-    def edit_profile(self):
-        self.parent_window.edit_profile(self.profile)
+
+	def update_status(self, text):
+		self.status.setText(f"Status: {text}")
+
+	def toggle_sync(self):
+		if not self.is_running:
+			# Start sync
+			self.sync.start(self.update_status, self.update_mirror_status)
+			self.sync_btn.setText("Stop")
+			self.is_running = True
+		else:
+			# Stop sync
+			self.sync.stop(self.update_status)
+			self.sync_btn.setText("Sync")
+			self.is_running = False
+
+	def edit_profile(self):
+		self.parent_window.edit_profile(self.profile)
 
 
 class MainWindow(QWidget):

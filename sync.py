@@ -53,20 +53,30 @@ class ProfileSync:
 	def mirrors(self):
 		return [p["path"] for p in self.profile["paths"] if p["role"] == "mirror"]
 
-	def run_sync(self):
+	def run_sync(self, mirror_callback=None):
 		ground = self.ground()
 		for mirror in self.mirrors():
-			rsync_sync(ground, mirror)
+			try:
+				if mirror_callback:
+					mirror_callback(mirror, "SYNCING")
 
-	def start(self, status_callback):
+				rsync_sync(ground, mirror)
+
+				if mirror_callback:
+					mirror_callback(mirror, "SYNCED")
+			except Exception:
+				if mirror_callback:
+					mirror_callback(mirror, "ERROR")
+
+	def start(self, status_callback, mirror_callback=None):
 		try:
 			self.state = "SYNCING"
 			status_callback(self.state)
 
-			self.run_sync()
+			self.run_sync(mirror_callback)
 
 			# Start watcher
-			handler = SyncHandler(self.run_sync)
+			handler = SyncHandler(lambda: self.run_sync(mirror_callback))
 			self.observer = Observer()
 			self.observer.schedule(handler, path=self.ground(), recursive=True)
 			self.observer.start()
