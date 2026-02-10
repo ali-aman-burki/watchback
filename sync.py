@@ -1,96 +1,197 @@
-import subprocess
 import os
+import shutil
+import threading
 import time
+from pathlib import Path
+
+from PySide6.QtCore import QThread, Signal
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
 
-def rsync_sync(source, destination):
-	if not os.path.exists(source):
-		raise Exception(f"Ground truth missing: {source}")
+# ---------------------------
+# Utilities
+# ---------------------------
 
-	if not os.path.exists(destination):
-		os.makedirs(destination, exist_ok=True)
+def files_differ(src: Path, dst: Path) -> bool:
+	if not dst.exists():
+		return True
+	if src.stat().st_size != dst.stat().st_size:
+		return True
+	if abs(src.stat().st_mtime - dst.stat().st_mtime) > 1:
+		return True
+	return False
 
-	cmd = [
-		"rsync",
-		"-a",
-		"--delete",
-		source.rstrip("/") + "/",
-		destination.rstrip("/") + "/"
-	]
-	subprocess.run(
-		cmd,
-		check=True,
-		stdout=subprocess.DEVNULL,
-		stderr=subprocess.DEVNULL
-	)
 
-class SyncHandler(FileSystemEventHandler):
-	def __init__(self, sync_callback):
-		self.sync_callback = sync_callback
-		self.last_run = 0
+# ---------------------------
+# Mirror worker
+# ---------------------------
 
-	def on_any_event(self, event):
-		now = time.time()
-		if now - self.last_run > 2:
-			self.sync_callback()
-			self.last_run = now
+class MirrorWorker(QThread):
+	status = Signal(str, str)      # mirror_path, status
+	progress = Signal(str, int)    # mirror_path, percent
+	finished = Signal(str)
 
+	def __init__(self, ground: str, mirror: str):
+		super().__init__()
+		self.ground = Path(ground)
+		self.mirror = Path(mirror)
+		self._stop_event = threading.Event()
+
+	def stop(self):
+		self._stop_event.set()
+
+	def run(self):
+		try:
+			self.status.emit(str(self.mirror), "SYNCING")
+			self.sync_full()
+
+			if not self._stop_event.is_set():
+				self.progress.emit(str(self.mirror), 100)
+				self.status.emit(str(self.mirror), "SYNCED")
+			else:
+				self.status.emit(str(self.mirror), "SYNCED")
+
+		except Exception as e:
+			self.status.emit(str(self.mirror), f"ERROR: {e}")
+		finally:
+			self.finished.emit(str(self.mirror))
+
+	def sync_full(self):
+		src_files = []
+		src_dirs = []
+
+		# Scan ground
+		for root, dirs, files in os.walk(self.ground):
+			root_path = Path(root)
+			src_dirs.append(root_path)
+
+			for f in files:
+				src_files.append(root_path / f)
+
+		# Create directories first (including empty ones)
+		for d in src_dirs:
+			if self._stop_event.is_set():
+				return
+
+			rel = d.relative_to(self.ground)
+			dst = self.mirror / rel
+			dst.mkdir(parents=True, exist_ok=True)
+
+		total = len(src_files)
+		processed = 0
+
+		# Copy/update files
+		for src in src_files:
+			if self._stop_event.is_set():
+				return
+
+			rel = src.relative_to(self.ground)
+			dst = self.mirror / rel
+			dst.parent.mkdir(parents=True, exist_ok=True)
+
+			if files_differ(src, dst):
+				shutil.copy2(src, dst)
+
+			processed += 1
+			percent = int((processed / total) * 100) if total else 100
+			self.progress.emit(str(self.mirror), percent)
+
+		# Delete extra files
+		for root, _, files in os.walk(self.mirror):
+			for f in files:
+				if self._stop_event.is_set():
+					return
+
+				dst = Path(root) / f
+				rel = dst.relative_to(self.mirror)
+				src = self.ground / rel
+
+				if not src.exists():
+					dst.unlink()
+
+		# Delete extra directories
+		for root, dirs, _ in os.walk(self.mirror, topdown=False):
+			for d in dirs:
+				path = Path(root) / d
+				rel = path.relative_to(self.mirror)
+				src = self.ground / rel
+
+				if not src.exists():
+					shutil.rmtree(path, ignore_errors=True)
+
+
+# ---------------------------
+# Watchdog handler
+# ---------------------------
+
+class ChangeHandler(FileSystemEventHandler):
+    def __init__(self, trigger):
+        self.trigger = trigger
+        self.last = 0
+
+    def on_any_event(self, event):
+        now = time.time()
+        if now - self.last > 1:
+            # Run trigger in a new thread
+            threading.Thread(target=self.trigger, daemon=True).start()
+            self.last = now
+
+
+# ---------------------------
+# Profile sync controller
+# ---------------------------
 
 class ProfileSync:
 	def __init__(self, profile):
 		self.profile = profile
+		self.workers = []
 		self.observer = None
-		self.state = "IDLE"
 
 	def ground(self):
-		for p in self.profile["paths"]:
-			if p["role"] == "ground":
-				return p["path"]
-		return None
+		return next(p["path"] for p in self.profile["paths"] if p["role"] == "ground")
 
 	def mirrors(self):
 		return [p["path"] for p in self.profile["paths"] if p["role"] == "mirror"]
 
-	def run_sync(self, mirror_callback=None):
+	def start(self, status_cb, mirror_status_cb, progress_cb=None):
 		ground = self.ground()
-		for mirror in self.mirrors():
-			try:
-				if mirror_callback:
-					mirror_callback(mirror, "SYNCING")
 
-				rsync_sync(ground, mirror)
+		def launch():
+			self.stop(None)
+			self.workers.clear()
 
-				if mirror_callback:
-					mirror_callback(mirror, "SYNCED")
-			except Exception:
-				if mirror_callback:
-					mirror_callback(mirror, "ERROR")
+			for mirror in self.mirrors():
+				worker = MirrorWorker(ground, mirror)
+				worker.status.connect(mirror_status_cb)
+				if progress_cb:
+					worker.progress.connect(progress_cb)
+				worker.start()
+				self.workers.append(worker)
 
-	def start(self, status_callback, mirror_callback=None):
-		try:
-			self.state = "SYNCING"
-			status_callback(self.state)
+		launch()
 
-			self.run_sync(mirror_callback)
+		# Watchdog
+		handler = ChangeHandler(launch)
+		self.observer = Observer()
+		self.observer.schedule(handler, ground, recursive=True)
+		self.observer.start()
 
-			# Start watcher
-			handler = SyncHandler(lambda: self.run_sync(mirror_callback))
-			self.observer = Observer()
-			self.observer.schedule(handler, path=self.ground(), recursive=True)
-			self.observer.start()
+		status_cb("SYNCING")
 
-			self.state = "SYNCED"
-			status_callback(self.state)
+	def stop(self, status_cb):
+		for w in self.workers:
+			w.stop()
+			w.wait()
 
-		except Exception as e:
-			self.state = "ERROR"
-			status_callback(f"ERROR: {e}")
-
-	def stop(self, status_callback):
 		if self.observer:
-			self.observer.stop()
-			self.observer.join()
-		self.state = "IDLE"
-		status_callback(self.state)
+			obs = self.observer
+			self.observer = None
+			obs.stop()
+			try:
+				obs.join()
+			except RuntimeError:
+				pass
+
+		if status_cb:
+			status_cb("IDLE")

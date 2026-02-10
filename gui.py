@@ -130,6 +130,7 @@ class ProfileWidget(QGroupBox):
 		self.profile = profile
 		self.parent_window = parent_window
 		self.sync = ProfileSync(profile)
+		self.mirror_progress = {}
 
 		layout = QVBoxLayout()
 
@@ -146,14 +147,12 @@ class ProfileWidget(QGroupBox):
 			p["path"] for p in profile["paths"] if p["role"] == "mirror"
 		]
 		for m in mirrors:
-			lbl = QLabel(f"{m} : IDLE")
+			lbl = QLabel(f"Mirror: {m} : IDLE")
 			self.mirror_labels[m] = lbl
 			layout.addWidget(lbl)
 
 
-		# Status
 		self.status = QLabel("Status: IDLE")
-		layout.addWidget(self.status)
 
 		# Buttons
 		btn_row = QHBoxLayout()
@@ -171,10 +170,27 @@ class ProfileWidget(QGroupBox):
 
 		self.is_running = False
 
+	def update_mirror_progress(self, path, percent):
+		if path in self.mirror_labels:
+			self.mirror_progress[path] = percent
+			self.mirror_labels[path].setText(
+				f"Mirror: {path} : [ SYNCING {percent}% ]"
+			)
+
 	def update_mirror_status(self, path, text):
 		if path in self.mirror_labels:
-			self.mirror_labels[path].setText(f"{path} : {text}")
+			percent = self.mirror_progress.get(path, 0)
 
+			if text.startswith("SYNCED"):
+				label = f"[ SYNCED {percent}% ]"
+			elif text.startswith("SYNCING"):
+				label = f"[ SYNCING {percent}% ]"
+			elif text.startswith("ERROR"):
+				label = f"[ {text} ]"
+			else:
+				label = f"[ {text} ]"
+
+			self.mirror_labels[path].setText(f"Mirror: {path} : {label}")
 
 	def update_status(self, text):
 		self.status.setText(f"Status: {text}")
@@ -182,7 +198,11 @@ class ProfileWidget(QGroupBox):
 	def toggle_sync(self):
 		if not self.is_running:
 			# Start sync
-			self.sync.start(self.update_status, self.update_mirror_status)
+			self.sync.start(
+				self.update_status,
+				self.update_mirror_status,
+				self.update_mirror_progress
+			)
 			self.sync_btn.setText("Stop")
 			self.is_running = True
 		else:
