@@ -44,6 +44,14 @@ class AddProfileDialog(QDialog):
 		save_btn.clicked.connect(self.accept)
 		self.layout.addWidget(save_btn)
 
+		delete_btn = QPushButton("Delete Profile")
+		delete_btn.clicked.connect(self.delete_profile)
+		delete_btn.setStyleSheet("background-color: #5a1e1e;")
+		self.layout.addWidget(delete_btn)
+
+		self.profile_to_delete = profile
+		self.delete_requested = False
+
 		self.setLayout(self.layout)
 
 		self.ground_index = None
@@ -52,6 +60,17 @@ class AddProfileDialog(QDialog):
 		# If editing existing profile
 		if profile:
 			self.load_profile(profile)
+
+	def delete_profile(self):
+		confirm = QMessageBox.question(
+			self,
+			"Delete profile",
+			"Are you sure you want to delete this profile?",
+			QMessageBox.Yes | QMessageBox.No
+		)
+		if confirm == QMessageBox.Yes:
+			self.delete_requested = True
+			self.accept()
 
 	def load_profile(self, profile):
 		self.name_input.setText(profile["name"])
@@ -248,6 +267,16 @@ class MainWindow(QWidget):
 	def edit_profile(self, profile):
 		dialog = AddProfileDialog(self, profile)
 		if dialog.exec():
+			# Delete case
+			if getattr(dialog, "delete_requested", False):
+				self.config["profiles"] = [
+					p for p in self.config["profiles"] if p is not profile
+				]
+				save_config(self.config)
+				self.refresh_ui()
+				return
+
+			# Edit case
 			new_profile = dialog.get_profile()
 			if not new_profile:
 				QMessageBox.warning(
@@ -257,7 +286,6 @@ class MainWindow(QWidget):
 				)
 				return
 
-			# Replace profile in config
 			for i, p in enumerate(self.config["profiles"]):
 				if p is profile:
 					self.config["profiles"][i] = new_profile
@@ -265,3 +293,4 @@ class MainWindow(QWidget):
 
 			save_config(self.config)
 			self.refresh_ui()
+
