@@ -126,16 +126,16 @@ class MirrorWorker(QThread):
 # ---------------------------
 
 class ChangeHandler(FileSystemEventHandler):
-    def __init__(self, trigger):
-        self.trigger = trigger
-        self.last = 0
+	def __init__(self, trigger):
+		self.trigger = trigger
+		self.last = 0
 
-    def on_any_event(self, event):
-        now = time.time()
-        if now - self.last > 1:
-            # Run trigger in a new thread
-            threading.Thread(target=self.trigger, daemon=True).start()
-            self.last = now
+	def on_any_event(self, event):
+		now = time.time()
+		if now - self.last > 1:
+			# Run trigger in a new thread
+			threading.Thread(target=self.trigger, daemon=True).start()
+			self.last = now
 
 
 # ---------------------------
@@ -154,18 +154,26 @@ class ProfileSync:
 	def mirrors(self):
 		return [p["path"] for p in self.profile["paths"] if p["role"] == "mirror"]
 
+	def _on_worker_finished(self, worker):
+		if worker in self.workers:
+			self.workers.remove(worker)
+		worker.deleteLater()
+
 	def start(self, status_cb, mirror_status_cb, progress_cb=None):
 		ground = self.ground()
 
 		def launch():
 			self.stop(None)
-			self.workers.clear()
+			self.workers = []
 
 			for mirror in self.mirrors():
 				worker = MirrorWorker(ground, mirror)
 				worker.status.connect(mirror_status_cb)
 				if progress_cb:
 					worker.progress.connect(progress_cb)
+
+				worker.finished.connect(lambda _, w=worker: self._on_worker_finished(w))
+
 				worker.start()
 				self.workers.append(worker)
 
@@ -180,7 +188,7 @@ class ProfileSync:
 		status_cb("SYNCING")
 
 	def stop(self, status_cb):
-		for w in self.workers:
+		for w in list(self.workers):
 			w.stop()
 			w.wait()
 
