@@ -44,7 +44,7 @@ class MirrorWorker(QThread):
 	def version_path(self, path: Path) -> Path:
 		rel = path.relative_to(self.current_root())
 		timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
-		return self.mirror / ".versions" / rel / timestamp
+		return self.mirror / "versions" / rel / timestamp
 
 	def version_file(self, path: Path):
 		if not path.exists() or path.is_dir():
@@ -215,7 +215,7 @@ class ProfileSync:
 								timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
 								vpath = (
 									mirror
-									/ ".versions"
+									/ "versions"
 									/ rel
 									/ timestamp
 								)
@@ -233,7 +233,7 @@ class ProfileSync:
 							timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
 							vpath = (
 								mirror
-								/ ".versions"
+								/ "versions"
 								/ rel
 								/ timestamp
 							)
