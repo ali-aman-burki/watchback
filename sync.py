@@ -38,6 +38,23 @@ class MirrorWorker(QThread):
 		self.mirror = Path(mirror)
 		self._stop_event = threading.Event()
 
+	def current_root(self):
+		return self.mirror / "current"
+
+	def version_path(self, path: Path) -> Path:
+		rel = path.relative_to(self.current_root())
+		timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
+		return self.mirror / ".versions" / rel / timestamp
+
+	def version_file(self, path: Path):
+		if not path.exists() or path.is_dir():
+			return
+
+		vpath = self.version_path(path)
+		vpath.parent.mkdir(parents=True, exist_ok=True)
+		shutil.move(str(path), str(vpath))
+
+
 	def stop(self):
 		self._stop_event.set()
 
@@ -61,6 +78,8 @@ class MirrorWorker(QThread):
 		src_files = []
 		src_dirs = []
 
+		self.current_root().mkdir(parents=True, exist_ok=True)
+
 		# Scan ground
 		for root, dirs, files in os.walk(self.ground):
 			root_path = Path(root)
@@ -75,7 +94,7 @@ class MirrorWorker(QThread):
 				return
 
 			rel = d.relative_to(self.ground)
-			dst = self.mirror / rel
+			dst = self.current_root() / rel
 			dst.mkdir(parents=True, exist_ok=True)
 
 		total = len(src_files)
@@ -87,10 +106,12 @@ class MirrorWorker(QThread):
 				return
 
 			rel = src.relative_to(self.ground)
-			dst = self.mirror / rel
+			dst = self.current_root() / rel
 			dst.parent.mkdir(parents=True, exist_ok=True)
 
 			if files_differ(src, dst):
+				if dst.exists():
+					self.version_file(dst)
 				shutil.copy2(src, dst)
 
 			processed += 1
@@ -98,23 +119,23 @@ class MirrorWorker(QThread):
 			self.progress.emit(str(self.mirror), percent)
 
 		# Delete extra files
-		for root, _, files in os.walk(self.mirror):
+		for root, _, files in os.walk(self.current_root()):
 			for f in files:
 				if self._stop_event.is_set():
 					return
 
 				dst = Path(root) / f
-				rel = dst.relative_to(self.mirror)
+				rel = dst.relative_to(self.current_root())
 				src = self.ground / rel
 
 				if not src.exists():
-					dst.unlink()
+					self.version_file(dst)
 
 		# Delete extra directories
-		for root, dirs, _ in os.walk(self.mirror, topdown=False):
+		for root, dirs, _ in os.walk(self.current_root(), topdown=False):
 			for d in dirs:
 				path = Path(root) / d
-				rel = path.relative_to(self.mirror)
+				rel = path.relative_to(self.current_root())
 				src = self.ground / rel
 
 				if not src.exists():
@@ -178,7 +199,10 @@ class ProfileSync:
 			return  # outside ground, ignore
 
 		for mirror in self.mirrors():
-			dst = Path(mirror) / rel
+			mirror = Path(mirror)
+			current_root = mirror / "current"
+			current_root.mkdir(parents=True, exist_ok=True)
+			dst = current_root / rel
 
 			try:
 				if src.exists():
@@ -186,6 +210,18 @@ class ProfileSync:
 						dst.mkdir(parents=True, exist_ok=True)
 					else:
 						if files_differ(src, dst):
+							if dst.exists():
+								# version old file
+								timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
+								vpath = (
+									mirror
+									/ ".versions"
+									/ rel
+									/ timestamp
+								)
+								vpath.parent.mkdir(parents=True, exist_ok=True)
+								shutil.move(str(dst), str(vpath))
+
 							dst.parent.mkdir(parents=True, exist_ok=True)
 							shutil.copy2(src, dst)
 				else:
@@ -193,7 +229,16 @@ class ProfileSync:
 						if dst.is_dir():
 							shutil.rmtree(dst)
 						else:
-							dst.unlink()
+							# version deleted file
+							timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
+							vpath = (
+								mirror
+								/ ".versions"
+								/ rel
+								/ timestamp
+							)
+							vpath.parent.mkdir(parents=True, exist_ok=True)
+							shutil.move(str(dst), str(vpath))
 			except Exception:
 				pass
 
