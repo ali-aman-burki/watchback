@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (
 	QFileDialog, QHBoxLayout, QMessageBox,
 	QScrollArea, QFrame
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 
 from sync import ProfileSync
 from config import save_config
@@ -153,6 +153,8 @@ class ProfileWidget(QGroupBox):
 
 
 		self.status = QLabel("Status: IDLE")
+		self.snapshot_status = QLabel("Snapshot: -")
+		layout.addWidget(self.snapshot_status)
 
 		# Buttons
 		btn_row = QHBoxLayout()
@@ -169,6 +171,37 @@ class ProfileWidget(QGroupBox):
 		self.setLayout(layout)
 
 		self.is_running = False
+		self.snapshot_timer = QTimer(self)
+		self.snapshot_timer.setInterval(60000)  # 60 seconds
+		self.snapshot_timer.timeout.connect(self.refresh_snapshot_label)
+
+	def set_running_style(self):
+		self.setStyleSheet("""
+			QGroupBox {
+				background-color: #2b2b2b;
+				border: 1px solid #3c3c3c;
+				border-left: 2px solid #3fb950;  /* green */
+				border-radius: 2px;
+				margin-top: 10px;
+				padding: 10px;
+			}
+		""")
+
+	def set_idle_style(self):
+		self.setStyleSheet("""
+			QGroupBox {
+				background-color: #2b2b2b;
+				border: 1px solid #3c3c3c;
+				border-radius: 2px;
+				margin-top: 10px;
+				padding: 10px;
+			}
+		""")
+
+
+	def refresh_snapshot_label(self):
+		if hasattr(self.sync, "_emit_snapshot_status"):
+			self.sync._emit_snapshot_status()
 
 	def update_mirror_progress(self, path, percent):
 		if path in self.mirror_labels:
@@ -195,21 +228,32 @@ class ProfileWidget(QGroupBox):
 	def update_status(self, text):
 		self.status.setText(f"Status: {text}")
 
+	def update_snapshot_status(self, text):
+		self.snapshot_status.setText(f"Snapshot: {text}")
+
 	def toggle_sync(self):
 		if not self.is_running:
 			# Start sync
 			self.sync.start(
 				self.update_status,
 				self.update_mirror_status,
-				self.update_mirror_progress
+				self.update_mirror_progress,
+				self.update_snapshot_status
 			)
 			self.sync_btn.setText("Stop")
 			self.is_running = True
+			self.snapshot_timer.start()
+			self.edit_btn.setEnabled(False)   # disable edit
+			self.set_running_style()
 		else:
 			# Stop sync
 			self.sync.stop(self.update_status)
 			self.sync_btn.setText("Sync")
 			self.is_running = False
+			self.edit_btn.setEnabled(True)
+			self.set_idle_style()
+
+
 
 	def edit_profile(self):
 		self.parent_window.edit_profile(self.profile)
@@ -223,6 +267,7 @@ class MainWindow(QWidget):
 		self.resize(720, 520)
 
 		self.config = config
+		self.profile_widgets = []
 
 		main_layout = QVBoxLayout()
 		main_layout.setContentsMargins(12, 12, 12, 12)
@@ -263,13 +308,13 @@ class MainWindow(QWidget):
 			if child.widget():
 				child.widget().deleteLater()
 
-		if not self.config["profiles"]:
-			empty_label = QLabel("No profiles configured.")
-			self.scroll_layout.addWidget(empty_label)
+		self.profile_widgets = []
 
 		for profile in self.config["profiles"]:
 			widget = ProfileWidget(profile, self)
+			self.profile_widgets.append(widget)
 			self.scroll_layout.addWidget(widget)
+
 
 		# Push content to top
 		self.scroll_layout.addStretch()
@@ -291,18 +336,52 @@ class MainWindow(QWidget):
 
 			self.config["profiles"].append(profile)
 			save_config(self.config)
-			self.refresh_ui()
+
+			widget = ProfileWidget(profile, self)
+			self.profile_widgets.append(widget)
+
+			# Insert above stretch
+			self.scroll_layout.insertWidget(
+				self.scroll_layout.count() - 1,
+				widget
+			)
+
 
 	def edit_profile(self, profile):
+		# Find the widget for this profile
+		widget = None
+		for w in self.profile_widgets:
+			if w.profile is profile:
+				widget = w
+				break
+
+		if widget and widget.is_running:
+			QMessageBox.warning(
+				self,
+				"Stop sync first",
+				"You must stop the sync before editing this profile."
+			)
+			return
+
 		dialog = AddProfileDialog(self, profile)
 		if dialog.exec():
 			# Delete case
 			if getattr(dialog, "delete_requested", False):
+				# Stop sync if running
+				if widget and widget.is_running:
+					widget.toggle_sync()
+
+				# Remove from config
 				self.config["profiles"] = [
 					p for p in self.config["profiles"] if p is not profile
 				]
 				save_config(self.config)
-				self.refresh_ui()
+
+				# Remove widget
+				if widget:
+					self.profile_widgets.remove(widget)
+					widget.deleteLater()
+
 				return
 
 			# Edit case
@@ -315,11 +394,22 @@ class MainWindow(QWidget):
 				)
 				return
 
+			# Replace in config
 			for i, p in enumerate(self.config["profiles"]):
 				if p is profile:
 					self.config["profiles"][i] = new_profile
 					break
 
 			save_config(self.config)
-			self.refresh_ui()
+
+			# Replace widget
+			if widget:
+				index = self.scroll_layout.indexOf(widget)
+				self.profile_widgets.remove(widget)
+				widget.deleteLater()
+
+				new_widget = ProfileWidget(new_profile, self)
+				self.profile_widgets.append(new_widget)
+				self.scroll_layout.insertWidget(index, new_widget)
+
 

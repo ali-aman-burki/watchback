@@ -2,7 +2,11 @@ import os
 import shutil
 import threading
 import time
+import json
+import hashlib
+
 from pathlib import Path
+from datetime import datetime
 
 from PySide6.QtCore import QThread, Signal
 from watchdog.observers import Observer
@@ -21,6 +25,45 @@ def files_differ(src: Path, dst: Path) -> bool:
 	if abs(src.stat().st_mtime - dst.stat().st_mtime) > 1:
 		return True
 	return False
+
+# ---------------------------
+# Snapshot utilities
+# ---------------------------
+
+SNAPSHOT_INTERVAL = 60 * 60 * 24
+
+def build_snapshot(current_root: Path):
+	files = []
+
+	for root, _, filenames in os.walk(current_root):
+		for f in filenames:
+			full = Path(root) / f
+			rel = full.relative_to(current_root)
+			files.append(str(rel))
+
+	files.sort()
+
+	return {
+		"timestamp": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
+		"files": files
+	}
+
+
+def snapshot_hash(snapshot):
+	encoded = json.dumps(snapshot["files"], sort_keys=True).encode()
+	return hashlib.sha256(encoded).hexdigest()
+
+
+def last_snapshot_hash(snapshots_dir: Path):
+	snaps = sorted(snapshots_dir.glob("*.json"))
+	if not snaps:
+		return None
+
+	last = snaps[-1]
+	with open(last, "r") as f:
+		data = json.load(f)
+
+	return snapshot_hash(data)
 
 
 # ---------------------------
@@ -54,6 +97,37 @@ class MirrorWorker(QThread):
 		vpath.parent.mkdir(parents=True, exist_ok=True)
 		shutil.move(str(path), str(vpath))
 
+	def should_snapshot(self):
+		snapshots_dir = self.mirror / "snapshots"
+		if not snapshots_dir.exists():
+			return True
+
+		snaps = sorted(snapshots_dir.glob("*.json"))
+		if not snaps:
+			return True
+
+		last = snaps[-1].stat().st_mtime
+		return (time.time() - last) > SNAPSHOT_INTERVAL
+
+	def maybe_create_snapshot(self):
+		snapshots_dir = self.mirror / "snapshots"
+		snapshots_dir.mkdir(parents=True, exist_ok=True)
+
+		current = self.current_root()
+		snapshot = build_snapshot(current)
+		new_hash = snapshot_hash(snapshot)
+
+		old_hash = last_snapshot_hash(snapshots_dir)
+
+		if new_hash == old_hash:
+			return  # no changes, skip snapshot
+
+		ts = snapshot["timestamp"]
+		path = snapshots_dir / f"{ts}.json"
+
+		with open(path, "w") as f:
+			json.dump(snapshot, f, indent=2)
+
 
 	def stop(self):
 		self._stop_event.set()
@@ -73,6 +147,7 @@ class MirrorWorker(QThread):
 			self.status.emit(str(self.mirror), f"ERROR: {e}")
 		finally:
 			self.finished.emit(str(self.mirror))
+
 
 	def sync_full(self):
 		src_files = []
@@ -188,6 +263,121 @@ class ProfileSync:
 		self.workers = []
 		self.observer = None
 		self.running = False
+		self.snapshot_thread = None
+		self.snapshot_stop = threading.Event()
+		self.snapshot_status_cb = None
+		self.last_snapshot_time = None
+
+	def load_last_snapshot_time(self):
+		latest_time = None
+
+		for mirror in self.mirrors():
+			snapshots_dir = Path(mirror) / "snapshots"
+			if not snapshots_dir.exists():
+				continue
+
+			snaps = sorted(snapshots_dir.glob("*.json"))
+			if not snaps:
+				continue
+
+			last = snaps[-1]
+			ts = last.stat().st_mtime
+
+			if latest_time is None or ts > latest_time:
+				latest_time = ts
+
+		self.last_snapshot_time = latest_time
+
+
+	def _emit_snapshot_status(self):
+		if not self.snapshot_status_cb:
+			return
+
+		if not self.last_snapshot_time:
+			self.snapshot_status_cb("Waiting for first snapshot")
+			return
+
+		now = time.time()
+		age = int(now - self.last_snapshot_time)
+		next_in = int(SNAPSHOT_INTERVAL - age)
+
+		if next_in < 0:
+			next_in = 0
+
+		def fmt(seconds):
+			minutes = seconds // 60
+			hours = minutes // 60
+			minutes = minutes % 60
+			days = hours // 24
+			hours = hours % 24
+
+			if days > 0:
+				return f"{days}d {hours}h"
+			if hours > 0:
+				return f"{hours}h {minutes}m"
+			return f"{minutes}m"
+
+		if age < 60:
+			age_text = "Just Now"
+		else:
+			age_text = f"{fmt(age)} ago"
+
+		next_text = fmt(next_in)
+
+		self.snapshot_status_cb(
+			f"{age_text} (next in {next_text})"
+		)
+
+	def create_snapshots_now(self):
+		created = False
+
+		for mirror in self.mirrors():
+			try:
+				worker = MirrorWorker(self.ground(), mirror)
+				before = self.last_snapshot_time
+				worker.maybe_create_snapshot()
+
+				# detect if a snapshot was actually created
+				snapshots_dir = Path(mirror) / "snapshots"
+				snaps = sorted(snapshots_dir.glob("*.json"))
+				if snaps:
+					ts = snaps[-1].stat().st_mtime
+					if not self.last_snapshot_time or ts > self.last_snapshot_time:
+						self.last_snapshot_time = ts
+						created = True
+			except Exception:
+				pass
+
+		if created:
+			self._emit_snapshot_status()
+
+
+	def snapshot_loop(self):
+		while not self.snapshot_stop.wait(SNAPSHOT_INTERVAL):
+			if not self.running:
+				continue
+
+			for mirror in self.mirrors():
+				try:
+					worker = MirrorWorker(self.ground(), mirror)
+					if worker.should_snapshot():
+						worker.maybe_create_snapshot()
+						self.last_snapshot_time = time.time()
+						self._emit_snapshot_status()
+				except Exception:
+					pass
+
+	def start_snapshot_timer(self):
+		if self.snapshot_thread:
+			return
+
+		self.snapshot_stop.clear()
+		self.snapshot_thread = threading.Thread(
+			target=self.snapshot_loop,
+			daemon=True
+		)
+		self.snapshot_thread.start()
+
 
 	def sync_single(self, changed_path):
 		ground = Path(self.ground())
@@ -196,7 +386,7 @@ class ProfileSync:
 		try:
 			rel = src.relative_to(ground)
 		except ValueError:
-			return  # outside ground, ignore
+			return
 
 		for mirror in self.mirrors():
 			mirror = Path(mirror)
@@ -253,11 +443,25 @@ class ProfileSync:
 			self.workers.remove(worker)
 		worker.deleteLater()
 
-	def start(self, status_cb, mirror_status_cb, progress_cb=None):
+		# If all workers are done, create snapshot and start timer
+		if not self.workers and self.running:
+			self.create_snapshots_now()
+			self.start_snapshot_timer()
+
+	def start(self, status_cb, mirror_status_cb, progress_cb=None, snapshot_status_cb=None):
+		self.snapshot_status_cb = snapshot_status_cb
+
 		if self.observer:
 			self.stop(None)
 		
 		self.running = True
+		self.load_last_snapshot_time()
+
+		if self.last_snapshot_time:
+			self._emit_snapshot_status()
+		else:
+			if self.snapshot_status_cb:
+				self.snapshot_status_cb("Waiting for first snapshot")
 
 		ground = self.ground()
 		self.workers = []
@@ -282,7 +486,14 @@ class ProfileSync:
 		status_cb("SYNCING")
 
 
+
 	def stop(self, status_cb):
+		self.running = False
+		self.snapshot_stop.set()
+		if self.snapshot_thread:
+			self.snapshot_thread.join(timeout=1)
+			self.snapshot_thread = None
+
 		for w in list(self.workers):
 			w.stop()
 			w.wait()
@@ -298,5 +509,15 @@ class ProfileSync:
 
 		if status_cb:
 			status_cb("IDLE")
+
+		if self.snapshot_status_cb:
+			if self.last_snapshot_time:
+				age = int(time.time() - self.last_snapshot_time)
+				mins = age // 60
+				hours = mins // 60
+				mins = mins % 60
+				self.snapshot_status_cb(f"stopped (last: {hours}h {mins}m ago)")
+			else:
+				self.snapshot_status_cb("stopped")
+
 		
-		self.running = False
