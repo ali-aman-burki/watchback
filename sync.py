@@ -126,17 +126,36 @@ class MirrorWorker(QThread):
 # ---------------------------
 
 class ChangeHandler(FileSystemEventHandler):
-	def __init__(self, trigger):
+	def __init__(self, trigger, is_running):
 		self.trigger = trigger
-		self.last = 0
+		self.is_running = is_running
+		self.pending = set()
+		self.lock = threading.Lock()
+		self.timer = None
+
+	def _flush(self):
+		with self.lock:
+			paths = list(self.pending)
+			self.pending.clear()
+			self.timer = None
+
+		if not self.is_running():
+			return
+
+		for p in paths:
+			self.trigger(p)
 
 	def on_any_event(self, event):
-		now = time.time()
-		if now - self.last > 1:
-			# Run trigger in a new thread
-			threading.Thread(target=self.trigger, daemon=True).start()
-			self.last = now
+		if event.is_directory and event.event_type == "modified":
+			return
 
+		with self.lock:
+			self.pending.add(event.src_path)
+
+			if self.timer is None:
+				self.timer = threading.Timer(0.2, self._flush)
+				self.timer.daemon = True
+				self.timer.start()
 
 # ---------------------------
 # Profile sync controller
@@ -147,6 +166,36 @@ class ProfileSync:
 		self.profile = profile
 		self.workers = []
 		self.observer = None
+		self.running = False
+
+	def sync_single(self, changed_path):
+		ground = Path(self.ground())
+		src = Path(changed_path)
+
+		try:
+			rel = src.relative_to(ground)
+		except ValueError:
+			return  # outside ground, ignore
+
+		for mirror in self.mirrors():
+			dst = Path(mirror) / rel
+
+			try:
+				if src.exists():
+					if src.is_dir():
+						dst.mkdir(parents=True, exist_ok=True)
+					else:
+						if files_differ(src, dst):
+							dst.parent.mkdir(parents=True, exist_ok=True)
+							shutil.copy2(src, dst)
+				else:
+					if dst.exists():
+						if dst.is_dir():
+							shutil.rmtree(dst)
+						else:
+							dst.unlink()
+			except Exception:
+				pass
 
 	def ground(self):
 		return next(p["path"] for p in self.profile["paths"] if p["role"] == "ground")
@@ -160,32 +209,33 @@ class ProfileSync:
 		worker.deleteLater()
 
 	def start(self, status_cb, mirror_status_cb, progress_cb=None):
-		ground = self.ground()
-
-		def launch():
+		if self.observer:
 			self.stop(None)
-			self.workers = []
+		
+		self.running = True
 
-			for mirror in self.mirrors():
-				worker = MirrorWorker(ground, mirror)
-				worker.status.connect(mirror_status_cb)
-				if progress_cb:
-					worker.progress.connect(progress_cb)
+		ground = self.ground()
+		self.workers = []
 
-				worker.finished.connect(lambda _, w=worker: self._on_worker_finished(w))
+		for mirror in self.mirrors():
+			worker = MirrorWorker(ground, mirror)
+			worker.status.connect(mirror_status_cb)
+			if progress_cb:
+				worker.progress.connect(progress_cb)
 
-				worker.start()
-				self.workers.append(worker)
+			worker.finished.connect(lambda _, w=worker: self._on_worker_finished(w))
 
-		launch()
+			worker.start()
+			self.workers.append(worker)
 
-		# Watchdog
-		handler = ChangeHandler(launch)
+		# Watchdog for incremental updates
+		handler = ChangeHandler(self.sync_single, lambda: self.running)
 		self.observer = Observer()
 		self.observer.schedule(handler, ground, recursive=True)
 		self.observer.start()
 
 		status_cb("SYNCING")
+
 
 	def stop(self, status_cb):
 		for w in list(self.workers):
@@ -203,3 +253,5 @@ class ProfileSync:
 
 		if status_cb:
 			status_cb("IDLE")
+		
+		self.running = False
