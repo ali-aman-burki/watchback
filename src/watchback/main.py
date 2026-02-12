@@ -1,7 +1,7 @@
 import sys
 from PySide6.QtWidgets import QApplication
-from config import load_config
-from gui import MainWindow
+from watchback.config import load_config
+from watchback.gui import MainWindow
 
 DARK_STYLE = """
 QWidget {

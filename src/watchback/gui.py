@@ -6,8 +6,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QTimer
 
-from sync import ProfileSync
-from config import save_config
+from watchback.sync import ProfileSync
+from watchback.config import save_config
 
 
 class AddProfileDialog(QDialog):
@@ -262,7 +262,7 @@ class ProfileWidget(QGroupBox):
 class MainWindow(QWidget):
 	def __init__(self, config):
 		super().__init__()
-		self.setWindowTitle("Watchback - Folder Sync Tool")
+		self.setWindowTitle("Watchback - Backup Tool")
 		self.setMinimumSize(600, 450)
 		self.resize(720, 520)
 

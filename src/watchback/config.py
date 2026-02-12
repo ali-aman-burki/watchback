@@ -1,7 +1,7 @@
 import json
 import os
 
-CONFIG_PATH = os.path.expanduser("~/.watchback_config.json")
+CONFIG_PATH = os.path.expanduser("~/.watchback.json")
 
 
 def load_config():

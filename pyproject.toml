@@ -1,0 +1,17 @@
+[project]
+name = "watchback"
+version = "0.1.0"
+description = "Simple background backup tool"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "PySide6>=6.6",
+    "watchdog>=3.0",
+]
+
+[project.scripts]
+watchback = "watchback.main:main"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
