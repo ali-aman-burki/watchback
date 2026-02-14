@@ -11,9 +11,6 @@ class FileVersionService:
 
 	@staticmethod
 	def list_versions(mirror: str, rel_path: str):
-		"""
-		Return sorted list of version timestamps for a file.
-		"""
 		mirror = Path(mirror)
 		rel_path = Path(rel_path)
 
@@ -32,9 +29,6 @@ class FileVersionService:
 
 	@staticmethod
 	def restore_version(mirror: str, ground: str, rel_path: str, timestamp: str):
-		"""
-		Restore a specific file version into ground truth.
-		"""
 		mirror = Path(mirror)
 		ground = Path(ground)
 		rel_path = Path(rel_path)
@@ -50,19 +44,11 @@ class FileVersionService:
 
 	@staticmethod
 	def export_version(mirror: str, rel_path: str, timestamp: str, out_path: str):
-		"""
-		Export a specific file version to a chosen location.
-		"""
 		src = FileVersionService.get_version_path(mirror, rel_path, timestamp)
 		if not src.exists():
 			raise FileNotFoundError("Version not found")
 
 		shutil.copy2(src, out_path)
-
-
-# ============================================================
-# Snapshot Service
-# ============================================================
 
 class SnapshotService:
 	@staticmethod
@@ -90,13 +76,8 @@ class SnapshotService:
 
 	@staticmethod
 	def _files_under_path(file_list, rel_path: Path):
-		"""
-		Filter snapshot file list to those under rel_path.
-		Handles root selections like "", ".", or "/".
-		"""
 		rel_str = str(rel_path).replace("\\", "/").strip("/")
 
-		# Normalize root cases
 		if rel_str in ("", ".", "./"):
 			return file_list
 
@@ -108,9 +89,6 @@ class SnapshotService:
 
 	@staticmethod
 	def resolve_file(mirror: str, snapshot_ts: str, rel_path: str) -> Path:
-		"""
-		Resolve the real file path for a file as it existed at snapshot_ts.
-		"""
 		mirror = Path(mirror)
 		rel_path = Path(rel_path)
 
@@ -118,7 +96,6 @@ class SnapshotService:
 		if current.exists():
 			return current
 
-		# look into versions
 		vdir = mirror / "versions" / rel_path
 		if not vdir.exists():
 			raise FileNotFoundError("File not found in snapshot")
@@ -134,9 +111,6 @@ class SnapshotService:
 
 	@staticmethod
 	def restore_file(mirror: str, ground: str, snapshot_ts: str, rel_path: str):
-		"""
-		Restore a single file from snapshot into ground truth.
-		"""
 		mirror = Path(mirror)
 		ground = Path(ground)
 		rel_path = Path(rel_path)
@@ -149,9 +123,6 @@ class SnapshotService:
 
 	@staticmethod
 	def restore_folder(mirror: str, ground: str, snapshot_ts: str, rel_path: str):
-		"""
-		Restore a folder from snapshot into ground truth.
-		"""
 		mirror = Path(mirror)
 		ground = Path(ground)
 		rel_path = Path(rel_path)
@@ -180,7 +151,6 @@ class SnapshotService:
 		if not targets:
 			raise FileNotFoundError("Nothing to export")
 
-		# Determine top-level folder name
 		rel_str = str(rel_path).strip("/.")
 
 		if rel_str in ("", ".", "./"):
@@ -191,11 +161,9 @@ class SnapshotService:
 			base_prefix = rel_str + "/"
 
 		with ZipFile(out_zip, "w", ZIP_DEFLATED) as zf:
-			# Add files
 			for f in targets:
 				src = SnapshotService.resolve_file(mirror, snapshot_ts, f)
 
-				# Compute relative path inside zip
 				if base_prefix and f.startswith(base_prefix):
 					inner = f[len(base_prefix):]
 				else:
@@ -204,10 +172,9 @@ class SnapshotService:
 				arcname = f"{root_name}/{inner}"
 				zf.write(src, arcname=arcname)
 
-			# Add snapshot metadata
 			info_text = (
 				"Watchback Snapshot Export\n"
-				"-------------------------\n\n"
+				"-------------------------\n"
 				f"Mirror:   {mirror}\n"
 				f"Snapshot: {snapshot_ts}\n"
 				f"Exported: {datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}\n"
@@ -218,9 +185,6 @@ class SnapshotService:
 
 	@staticmethod
 	def list_snapshot_files(mirror: str, snapshot_ts: str):
-		"""
-		Return all files in a snapshot.
-		"""
 		mirror = Path(mirror)
 		snap = SnapshotService._load_snapshot(mirror, snapshot_ts)
 		return snap["files"]

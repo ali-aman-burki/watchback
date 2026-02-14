@@ -26,13 +26,9 @@ class FileVersionDialog(QDialog):
 		]
 		self.mirror = self.mirrors[0]
 
-		self.view_mode = "tree"  # or "list"
+		self.view_mode = "tree"
 
 		layout = QVBoxLayout(self)
-
-		# -------------------------
-		# Top controls
-		# -------------------------
 		top_row = QHBoxLayout()
 
 		top_row.addWidget(QLabel("Mirror:"))
@@ -51,19 +47,14 @@ class FileVersionDialog(QDialog):
 
 		layout.addLayout(top_row)
 
-		# -------------------------
-		# Split layout
-		# -------------------------
 		splitter = QSplitter()
 		layout.addWidget(splitter)
 
-		# File tree
 		self.tree = QTreeWidget()
 		self.tree.setHeaderLabel("Files")
 		self.tree.itemClicked.connect(self.on_file_selected)
 		splitter.addWidget(self.tree)
 
-		# Version panel
 		right_panel = QWidget()
 		right_layout = QVBoxLayout(right_panel)
 
@@ -89,18 +80,12 @@ class FileVersionDialog(QDialog):
 		self.current_rel_path = None
 		self.populate_tree()
 
-	# -------------------------
-	# Mirror switching
-	# -------------------------
 	def on_mirror_changed(self, text):
 		self.mirror = text
 		self.current_rel_path = None
 		self.version_list.clear()
 		self.populate_tree()
 
-	# -------------------------
-	# View toggle
-	# -------------------------
 	def toggle_view(self):
 		if self.view_mode == "tree":
 			self.view_mode = "list"
@@ -111,9 +96,6 @@ class FileVersionDialog(QDialog):
 
 		self.populate_tree()
 
-	# -------------------------
-	# Build file view
-	# -------------------------
 	def populate_tree(self):
 		current_root = Path(self.mirror) / "current"
 		self.tree.clear()
@@ -134,7 +116,6 @@ class FileVersionDialog(QDialog):
 					self.tree.addTopLevelItem(item)
 			return
 
-		# Tree mode
 		def add_items(parent_item, path):
 			for entry in sorted(path.iterdir()):
 				item = QTreeWidgetItem([entry.name])
@@ -155,9 +136,6 @@ class FileVersionDialog(QDialog):
 		add_items(root_item, current_root)
 		self.tree.expandAll()
 
-	# -------------------------
-	# File selected
-	# -------------------------
 	def on_file_selected(self, item):
 		rel_path = item.data(0, Qt.UserRole)
 		if not rel_path:
@@ -173,9 +151,6 @@ class FileVersionDialog(QDialog):
 
 		self.current_rel_path = rel_path
 
-	# -------------------------
-	# Restore
-	# -------------------------
 	def restore_selected(self):
 		item = self.version_list.currentItem()
 		if not item or not self.current_rel_path:
@@ -202,9 +177,6 @@ class FileVersionDialog(QDialog):
 
 		QMessageBox.information(self, "Done", "File restored to ground.")
 
-	# -------------------------
-	# Download
-	# -------------------------
 	def download_selected(self):
 		item = self.version_list.currentItem()
 		if not item or not self.current_rel_path:
@@ -245,12 +217,7 @@ class SnapshotExplorerDialog(QDialog):
 		self.snapshot = None
 
 		layout = QVBoxLayout(self)
-
-		# -------------------------
-		# Top controls
-		# -------------------------
 		top_row = QHBoxLayout()
-
 		top_row.addWidget(QLabel("Mirror:"))
 
 		self.mirror_combo = QComboBox()
@@ -268,18 +235,13 @@ class SnapshotExplorerDialog(QDialog):
 		top_row.addStretch()
 		layout.addLayout(top_row)
 
-		# -------------------------
-		# Split layout
-		# -------------------------
 		splitter = QSplitter()
 		layout.addWidget(splitter)
 
-		# Tree
 		self.tree = QTreeWidget()
 		self.tree.setHeaderLabel("Snapshot")
 		splitter.addWidget(self.tree)
 
-		# Right panel
 		right_panel = QWidget()
 		right_layout = QVBoxLayout(right_panel)
 
@@ -339,7 +301,6 @@ class SnapshotExplorerDialog(QDialog):
 
 		root = {}
 
-		# Build tree structure
 		for f in files:
 			parts = Path(f).parts
 			node = root

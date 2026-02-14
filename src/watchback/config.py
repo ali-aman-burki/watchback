@@ -3,7 +3,6 @@ import os
 
 CONFIG_PATH = os.path.expanduser("~/.watchback.json")
 
-
 def load_config():
     if not os.path.exists(CONFIG_PATH):
         return {"profiles": []}

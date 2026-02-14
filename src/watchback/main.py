@@ -47,7 +47,6 @@ QLineEdit, QListWidget {
 }
 """
 
-
 def main():
     app = QApplication(sys.argv)
     app.setStyleSheet(DARK_STYLE)

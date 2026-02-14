@@ -59,7 +59,6 @@ class AddProfileDialog(QDialog):
 		self.ground_index = None
 		self.folder_list.itemDoubleClicked.connect(self.set_ground)
 
-		# If editing existing profile
 		if profile:
 			self.load_profile(profile)
 
@@ -136,14 +135,12 @@ class ProfileWidget(QGroupBox):
 
 		layout = QVBoxLayout()
 
-		# Ground truth
 		ground = next(
 			p["path"] for p in profile["paths"] if p["role"] == "ground"
 		)
 		ground_label = QLabel(f"Ground: {ground}")
 		layout.addWidget(ground_label)
 
-		# Mirrors with status
 		self.mirror_labels = {}
 		mirrors = [
 			p["path"] for p in profile["paths"] if p["role"] == "mirror"
@@ -158,7 +155,6 @@ class ProfileWidget(QGroupBox):
 		self.snapshot_status = QLabel("Snapshot: -")
 		layout.addWidget(self.snapshot_status)
 
-		# Buttons
 		btn_row = QHBoxLayout()
 
 		self.sync_btn = QPushButton("Sync")
@@ -266,7 +262,6 @@ class ProfileWidget(QGroupBox):
 
 	def toggle_sync(self):
 		if not self.is_running:
-			# Start sync
 			self.sync.start(
 				self.update_status,
 				self.update_mirror_status,
@@ -276,10 +271,9 @@ class ProfileWidget(QGroupBox):
 			self.sync_btn.setText("Stop")
 			self.is_running = True
 			self.snapshot_timer.start()
-			self.edit_btn.setEnabled(False)   # disable edit
+			self.edit_btn.setEnabled(False)
 			self.set_running_style()
 		else:
-			# Stop sync
 			self.sync.stop(self.update_status)
 			self.sync_btn.setText("Sync")
 			self.is_running = False
@@ -307,13 +301,11 @@ class MainWindow(QWidget):
 		main_layout.setSpacing(10)
 		self.setLayout(main_layout)
 
-		# Scroll area
 		self.scroll = QScrollArea()
 		self.scroll.setWidgetResizable(True)
 		self.scroll.setFrameShape(QFrame.NoFrame)
 		main_layout.addWidget(self.scroll)
 
-		# Container inside scroll area
 		self.scroll_container = QWidget()
 		self.scroll_layout = QVBoxLayout()
 		self.scroll_layout.setAlignment(Qt.AlignTop)
@@ -322,7 +314,6 @@ class MainWindow(QWidget):
 
 		self.scroll.setWidget(self.scroll_container)
 
-		# Bottom button row
 		bottom_row = QHBoxLayout()
 		bottom_row.addStretch()
 
@@ -335,7 +326,6 @@ class MainWindow(QWidget):
 		self.refresh_ui()
 
 	def refresh_ui(self):
-		# Clear profile cards
 		while self.scroll_layout.count():
 			child = self.scroll_layout.takeAt(0)
 			if child.widget():
@@ -348,8 +338,6 @@ class MainWindow(QWidget):
 			self.profile_widgets.append(widget)
 			self.scroll_layout.addWidget(widget)
 
-
-		# Push content to top
 		self.scroll_layout.addStretch()
 
 	def add_profile(self):
@@ -373,7 +361,6 @@ class MainWindow(QWidget):
 			widget = ProfileWidget(profile, self)
 			self.profile_widgets.append(widget)
 
-			# Insert above stretch
 			self.scroll_layout.insertWidget(
 				self.scroll_layout.count() - 1,
 				widget
@@ -381,7 +368,6 @@ class MainWindow(QWidget):
 
 
 	def edit_profile(self, profile):
-		# Find the widget for this profile
 		widget = None
 		for w in self.profile_widgets:
 			if w.profile is profile:
@@ -400,24 +386,20 @@ class MainWindow(QWidget):
 		if dialog.exec():
 			# Delete case
 			if getattr(dialog, "delete_requested", False):
-				# Stop sync if running
 				if widget and widget.is_running:
 					widget.toggle_sync()
 
-				# Remove from config
 				self.config["profiles"] = [
 					p for p in self.config["profiles"] if p is not profile
 				]
 				save_config(self.config)
 
-				# Remove widget
 				if widget:
 					self.profile_widgets.remove(widget)
 					widget.deleteLater()
 
 				return
 
-			# Edit case
 			new_profile = dialog.get_profile()
 			if not new_profile:
 				QMessageBox.warning(
@@ -427,7 +409,6 @@ class MainWindow(QWidget):
 				)
 				return
 
-			# Replace in config
 			for i, p in enumerate(self.config["profiles"]):
 				if p is profile:
 					self.config["profiles"][i] = new_profile
@@ -435,7 +416,6 @@ class MainWindow(QWidget):
 
 			save_config(self.config)
 
-			# Replace widget
 			if widget:
 				index = self.scroll_layout.indexOf(widget)
 				self.profile_widgets.remove(widget)

@@ -31,10 +31,6 @@ def files_differ(src: Path, dst: Path) -> bool:
 		return True
 	return False
 
-# ---------------------------
-# Snapshot utilities
-# ---------------------------
-
 SNAPSHOT_INTERVAL = 60
 
 def build_snapshot(current_root: Path):
@@ -70,14 +66,9 @@ def last_snapshot_hash(snapshots_dir: Path):
 
 	return snapshot_hash(data)
 
-
-# ---------------------------
-# Mirror worker
-# ---------------------------
-
 class MirrorWorker(QThread):
-	status = Signal(str, str)      # mirror_path, status
-	progress = Signal(str, int)    # mirror_path, percent
+	status = Signal(str, str)
+	progress = Signal(str, int)
 	finished = Signal(str)
 
 	def __init__(self, ground: str, mirror: str):
@@ -117,7 +108,7 @@ class MirrorWorker(QThread):
 		old_hash = last_snapshot_hash(snapshots_dir)
 
 		if new_hash == old_hash:
-			return  # no changes, skip snapshot
+			return 
 
 		ts = snapshot["timestamp"]
 		path = snapshots_dir / f"{ts}.json"
@@ -152,7 +143,6 @@ class MirrorWorker(QThread):
 
 		self.current_root().mkdir(parents=True, exist_ok=True)
 
-		# Scan ground
 		for root, dirs, files in os.walk(self.ground):
 			root_path = Path(root)
 			src_dirs.append(root_path)
@@ -160,7 +150,6 @@ class MirrorWorker(QThread):
 			for f in files:
 				src_files.append(root_path / f)
 
-		# Create directories first (including empty ones)
 		for d in src_dirs:
 			if self._stop_event.is_set():
 				return
@@ -172,7 +161,6 @@ class MirrorWorker(QThread):
 		total = len(src_files)
 		processed = 0
 
-		# Copy/update files
 		for src in src_files:
 			if self._stop_event.is_set():
 				return
@@ -190,7 +178,6 @@ class MirrorWorker(QThread):
 			percent = int((processed / total) * 100) if total else 100
 			self.progress.emit(str(self.mirror), percent)
 
-		# Delete extra files
 		for root, _, files in os.walk(self.current_root()):
 			for f in files:
 				if self._stop_event.is_set():
@@ -203,7 +190,6 @@ class MirrorWorker(QThread):
 				if not src.exists():
 					version_file(self.mirror, rel, dst)
 
-		# Delete extra directories
 		for root, dirs, _ in os.walk(self.current_root(), topdown=False):
 			for d in dirs:
 				path = Path(root) / d
@@ -213,10 +199,6 @@ class MirrorWorker(QThread):
 				if not src.exists():
 					shutil.rmtree(path, ignore_errors=True)
 
-
-# ---------------------------
-# Watchdog handler
-# ---------------------------
 
 class ChangeHandler(FileSystemEventHandler):
 	def __init__(self, trigger, is_running):
@@ -249,10 +231,6 @@ class ChangeHandler(FileSystemEventHandler):
 				self.timer = threading.Timer(0.2, self._flush)
 				self.timer.daemon = True
 				self.timer.start()
-
-# ---------------------------
-# Profile sync controller
-# ---------------------------
 
 class ProfileSync:
 	def __init__(self, profile):
