@@ -8,7 +8,9 @@ from PySide6.QtCore import Qt, QTimer
 
 from watchback.sync import ProfileSync
 from watchback.config import save_config
+from watchback.restore_gui import FileVersionDialog, SnapshotExplorerDialog
 
+SNAPSHOT_LABEL_INTERVAL = 60000
 
 class AddProfileDialog(QDialog):
 	def __init__(self, parent=None, profile=None):
@@ -167,12 +169,20 @@ class ProfileWidget(QGroupBox):
 		self.edit_btn.clicked.connect(self.edit_profile)
 		btn_row.addWidget(self.edit_btn)
 
+		self.versions_btn = QPushButton("File Versions")
+		self.versions_btn.clicked.connect(self.open_versions)
+		btn_row.addWidget(self.versions_btn)
+
+		self.snapshot_btn = QPushButton("Snapshots")
+		self.snapshot_btn.clicked.connect(self.open_snapshots)
+		btn_row.addWidget(self.snapshot_btn)
+
 		layout.addLayout(btn_row)
 		self.setLayout(layout)
 
 		self.is_running = False
 		self.snapshot_timer = QTimer(self)
-		self.snapshot_timer.setInterval(60000)  # 60 seconds
+		self.snapshot_timer.setInterval(SNAPSHOT_LABEL_INTERVAL)
 		self.snapshot_timer.timeout.connect(self.refresh_snapshot_label)
 
 	def set_running_style(self):
@@ -198,6 +208,29 @@ class ProfileWidget(QGroupBox):
 			}
 		""")
 
+	def open_snapshots(self):
+		if self.is_running:
+			QMessageBox.warning(
+				self,
+				"Stop sync first",
+				"You must stop the sync before exploring snapshots."
+			)
+			return
+
+		dialog = SnapshotExplorerDialog(self.profile, self)
+		dialog.exec()
+
+	def open_versions(self):
+		if self.is_running:
+			QMessageBox.warning(
+				self,
+				"Stop sync first",
+				"You must stop the sync before exploring versions."
+			)
+			return
+
+		dialog = FileVersionDialog(self.profile, self)
+		dialog.exec()
 
 	def refresh_snapshot_label(self):
 		if hasattr(self.sync, "_emit_snapshot_status"):

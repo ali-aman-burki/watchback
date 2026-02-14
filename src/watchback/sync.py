@@ -12,10 +12,15 @@ from PySide6.QtCore import QThread, Signal
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
+def version_file(mirror: Path, rel_path: Path, dst: Path):
+    if not dst.exists() or dst.is_dir():
+        return
 
-# ---------------------------
-# Utilities
-# ---------------------------
+    timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
+    vpath = mirror / "versions" / rel_path / timestamp
+    vpath.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(dst), str(vpath))
+
 
 def files_differ(src: Path, dst: Path) -> bool:
 	if not dst.exists():
@@ -30,7 +35,7 @@ def files_differ(src: Path, dst: Path) -> bool:
 # Snapshot utilities
 # ---------------------------
 
-SNAPSHOT_INTERVAL = 60 * 60 * 24
+SNAPSHOT_INTERVAL = 60
 
 def build_snapshot(current_root: Path):
 	files = []
@@ -88,14 +93,6 @@ class MirrorWorker(QThread):
 		rel = path.relative_to(self.current_root())
 		timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
 		return self.mirror / "versions" / rel / timestamp
-
-	def version_file(self, path: Path):
-		if not path.exists() or path.is_dir():
-			return
-
-		vpath = self.version_path(path)
-		vpath.parent.mkdir(parents=True, exist_ok=True)
-		shutil.move(str(path), str(vpath))
 
 	def should_snapshot(self):
 		snapshots_dir = self.mirror / "snapshots"
@@ -186,7 +183,7 @@ class MirrorWorker(QThread):
 
 			if files_differ(src, dst):
 				if dst.exists():
-					self.version_file(dst)
+					version_file(self.mirror, rel, dst)
 				shutil.copy2(src, dst)
 
 			processed += 1
@@ -204,7 +201,7 @@ class MirrorWorker(QThread):
 				src = self.ground / rel
 
 				if not src.exists():
-					self.version_file(dst)
+					version_file(self.mirror, rel, dst)
 
 		# Delete extra directories
 		for root, dirs, _ in os.walk(self.current_root(), topdown=False):
