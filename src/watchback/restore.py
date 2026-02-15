@@ -4,6 +4,9 @@ from pathlib import Path
 from datetime import datetime
 from zipfile import ZipFile, ZIP_DEFLATED
 
+def object_path(mirror: Path, h: str) -> Path:
+    return mirror / "objects" / h[:2] / h
+
 class FileVersionService:
 	@staticmethod
 	def _version_dir(mirror: Path, rel_path: Path) -> Path:
@@ -33,9 +36,20 @@ class FileVersionService:
 		ground = Path(ground)
 		rel_path = Path(rel_path)
 
-		src = FileVersionService.get_version_path(mirror, rel_path, timestamp)
-		if not src.exists():
+		meta_path = FileVersionService.get_version_path(
+			mirror, rel_path, timestamp
+		)
+		if not meta_path.exists():
 			raise FileNotFoundError("Version not found")
+
+		with open(meta_path, "r") as f:
+			meta = json.load(f)
+
+		h = meta["hash"]
+		src = object_path(mirror, h)
+
+		if not src.exists():
+			raise FileNotFoundError("Object missing")
 
 		dst = ground / rel_path
 		dst.parent.mkdir(parents=True, exist_ok=True)
@@ -44,9 +58,23 @@ class FileVersionService:
 
 	@staticmethod
 	def export_version(mirror: str, rel_path: str, timestamp: str, out_path: str):
-		src = FileVersionService.get_version_path(mirror, rel_path, timestamp)
-		if not src.exists():
+		mirror = Path(mirror)
+		rel_path = Path(rel_path)
+
+		meta_path = FileVersionService.get_version_path(
+			mirror, rel_path, timestamp
+		)
+		if not meta_path.exists():
 			raise FileNotFoundError("Version not found")
+
+		with open(meta_path, "r") as f:
+			meta = json.load(f)
+
+		h = meta["hash"]
+		src = object_path(mirror, h)
+
+		if not src.exists():
+			raise FileNotFoundError("Object missing")
 
 		shutil.copy2(src, out_path)
 
@@ -90,24 +118,21 @@ class SnapshotService:
 	@staticmethod
 	def resolve_file(mirror: str, snapshot_ts: str, rel_path: str) -> Path:
 		mirror = Path(mirror)
-		rel_path = Path(rel_path)
+		rel_path = str(rel_path).replace("\\", "/")
 
-		current = mirror / "current" / rel_path
-		if current.exists():
-			return current
+		snap = SnapshotService._load_snapshot(mirror, snapshot_ts)
+		files = snap["files"]
 
-		vdir = mirror / "versions" / rel_path
-		if not vdir.exists():
-			raise FileNotFoundError("File not found in snapshot")
+		if rel_path not in files:
+			raise FileNotFoundError("File not in snapshot")
 
-		candidates = sorted(p.name for p in vdir.iterdir())
-		candidates = [c for c in candidates if c <= snapshot_ts]
+		h = files[rel_path]
+		obj = object_path(mirror, h)
 
-		if not candidates:
-			raise FileNotFoundError("No version available for snapshot")
+		if not obj.exists():
+			raise FileNotFoundError("Object missing")
 
-		chosen = candidates[-1]
-		return vdir / chosen
+		return obj
 
 	@staticmethod
 	def restore_file(mirror: str, ground: str, snapshot_ts: str, rel_path: str):

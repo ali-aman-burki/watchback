@@ -12,14 +12,94 @@ from PySide6.QtCore import QThread, Signal
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
-def version_file(mirror: Path, rel_path: Path, dst: Path):
-    if not dst.exists() or dst.is_dir():
-        return
+def file_hash(path: Path, chunk_size=1024 * 1024):
+	h = hashlib.sha256()
+	with open(path, "rb") as f:
+		while True:
+			chunk = f.read(chunk_size)
+			if not chunk:
+				break
+			h.update(chunk)
+	return h.hexdigest()
 
-    timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
-    vpath = mirror / "versions" / rel_path / timestamp
-    vpath.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(dst), str(vpath))
+
+def object_path(mirror: Path, h: str) -> Path:
+	return mirror / "objects" / h[:2] / h
+
+
+def store_object(mirror: Path, src: Path) -> str:
+	h = file_hash(src)
+	opath = object_path(mirror, h)
+
+	if not opath.exists():
+		opath.parent.mkdir(parents=True, exist_ok=True)
+		shutil.copy2(src, opath)
+
+	return h
+
+def gc_objects(mirror: Path):
+	objects_root = mirror / "objects"
+	snapshots_root = mirror / "snapshots"
+	versions_root = mirror / "versions"
+
+	if not objects_root.exists():
+		return
+
+	live_hashes = set()
+
+	if snapshots_root.exists():
+		for snap in snapshots_root.glob("*.json"):
+			try:
+				with open(snap, "r") as f:
+					data = json.load(f)
+
+				files = data.get("files", {})
+				if isinstance(files, dict):
+					live_hashes.update(files.values())
+			except Exception:
+				pass
+
+	if versions_root.exists():
+		for root, _, files in os.walk(versions_root):
+			for f in files:
+				if not f.endswith(".json"):
+					continue
+				path = Path(root) / f
+				try:
+					with open(path, "r") as vf:
+						meta = json.load(vf)
+					h = meta.get("hash")
+					if h:
+						live_hashes.add(h)
+				except Exception:
+					pass
+
+	for root, _, files in os.walk(objects_root):
+		for f in files:
+			obj = Path(root) / f
+			h = obj.name
+			if h not in live_hashes:
+				try:
+					obj.unlink()
+				except Exception:
+					pass
+
+def version_file(mirror: Path, rel_path: Path, dst: Path):
+	if not dst.exists() or dst.is_dir():
+		return
+
+	timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
+
+	h = store_object(mirror, dst)
+
+	vmeta = mirror / "versions" / rel_path / f"{timestamp}.json"
+	vmeta.parent.mkdir(parents=True, exist_ok=True)
+
+	with open(vmeta, "w") as f:
+		json.dump({
+			"hash": h,
+			"size": dst.stat().st_size
+		}, f)
 
 
 def files_differ(src: Path, dst: Path) -> bool:
@@ -31,16 +111,15 @@ def files_differ(src: Path, dst: Path) -> bool:
 		return True
 	return False
 
-def build_snapshot(current_root: Path):
-	files = []
+def build_snapshot(current_root: Path, mirror: Path):
+	files = {}
 
 	for root, _, filenames in os.walk(current_root):
 		for f in filenames:
 			full = Path(root) / f
 			rel = full.relative_to(current_root)
-			files.append(str(rel))
-
-	files.sort()
+			h = store_object(mirror, full)
+			files[str(rel)] = h
 
 	return {
 		"timestamp": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
@@ -65,51 +144,52 @@ def last_snapshot_hash(snapshots_dir: Path):
 	return snapshot_hash(data)
 
 def parse_ts(name: str):
-    try:
-        return datetime.strptime(name, "%Y-%m-%d_%H-%M-%S").timestamp()
-    except Exception:
-        return None
+	try:
+		return datetime.strptime(name, "%Y-%m-%d_%H-%M-%S").timestamp()
+	except Exception:
+		return None
 
 
 def cleanup_snapshots(mirror: Path, retention_seconds: int):
-    sdir = mirror / "snapshots"
-    if not sdir.exists():
-        return
+	sdir = mirror / "snapshots"
+	if not sdir.exists():
+		return
 
-    cutoff = time.time() - retention_seconds
+	cutoff = time.time() - retention_seconds
 
-    for snap in sdir.glob("*.json"):
-        try:
-            if snap.stat().st_mtime < cutoff:
-                snap.unlink(missing_ok=True)
-        except Exception:
-            pass
+	for snap in sdir.glob("*.json"):
+		try:
+			if snap.stat().st_mtime < cutoff:
+				snap.unlink(missing_ok=True)
+		except Exception:
+			pass
 
 
 def cleanup_versions(mirror: Path, retention_seconds: int):
-    vroot = mirror / "versions"
-    if not vroot.exists():
-        return
+	vroot = mirror / "versions"
+	if not vroot.exists():
+		return
 
-    cutoff = time.time() - retention_seconds
+	cutoff = time.time() - retention_seconds
 
-    for root, _, files in os.walk(vroot):
-        for f in files:
-            ts = parse_ts(f)
-            if ts and ts < cutoff:
-                try:
-                    (Path(root) / f).unlink()
-                except Exception:
-                    pass
+	for root, _, files in os.walk(vroot):
+		for f in files:
+			ts = parse_ts(f)
+			if ts and ts < cutoff:
+				try:
+					(Path(root) / f).unlink()
+				except Exception:
+					pass
 
 
 def apply_retention(mirror: Path, retention_seconds: int):
-    if not retention_seconds:
-        return
+	if not retention_seconds:
+		return
 
-    cleanup_snapshots(mirror, retention_seconds)
-    cleanup_versions(mirror, retention_seconds)
+	cleanup_snapshots(mirror, retention_seconds)
+	cleanup_versions(mirror, retention_seconds)
 
+	gc_objects(mirror)
 
 class MirrorWorker(QThread):
 	status = Signal(str, str)
@@ -147,7 +227,7 @@ class MirrorWorker(QThread):
 		snapshots_dir.mkdir(parents=True, exist_ok=True)
 
 		current = self.current_root()
-		snapshot = build_snapshot(current)
+		snapshot = build_snapshot(current, self.mirror)
 		new_hash = snapshot_hash(snapshot)
 
 		old_hash = last_snapshot_hash(snapshots_dir)
