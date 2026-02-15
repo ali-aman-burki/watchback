@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from PySide6.QtWidgets import (
 	QWidget, QVBoxLayout, QPushButton, QLabel, QGroupBox,
 	QDialog, QLineEdit, QListWidget, QListWidgetItem,
@@ -37,6 +39,14 @@ class AddProfileDialog(QDialog):
 		self.interval_input = QLineEdit()
 		self.interval_input.setPlaceholderText("Default: 60")
 		self.layout.addWidget(self.interval_input)
+
+		retention_label = QLabel("Retention (days)")
+		retention_label.setStyleSheet(header_style)
+		self.layout.addWidget(retention_label)
+
+		self.retention_input = QLineEdit()
+		self.retention_input.setPlaceholderText("Empty = unlimited")
+		self.layout.addWidget(self.retention_input)
 
 		folders_label = QLabel("Folders (Ground + Mirrors)")
 		folders_label.setStyleSheet(header_style)
@@ -93,9 +103,16 @@ class AddProfileDialog(QDialog):
 
 	def load_profile(self, profile):
 		self.name_input.setText(profile["name"])
+
 		interval = profile.get("snapshot_interval", 3600)
-		minutes = int(interval // 60)
-		self.interval_input.setText(str(minutes))
+		minutes = interval / 60
+		self.interval_input.setText(str(round(minutes, 3)).rstrip("0").rstrip("."))
+
+		ret = profile.get("retention_seconds")
+		if ret:
+			days = ret / 86400
+			self.retention_input.setText(str(round(days, 3)).rstrip("0").rstrip("."))
+
 		for i, p in enumerate(profile["paths"]):
 			item = QListWidgetItem(p["path"])
 			self.folder_list.addItem(item)
@@ -137,16 +154,28 @@ class AddProfileDialog(QDialog):
 		if self.ground_index is None:
 			return None
 
-		# interval
 		interval_text = self.interval_input.text().strip()
 		if interval_text:
 			try:
-				minutes = int(interval_text)
-				interval = max(60, minutes * 60)  # minimum 1 minute
+				minutes = float(interval_text)
+				interval = max(60, int(minutes * 60))
 			except ValueError:
 				return None
 		else:
-			interval = 3600  # default 1 hour
+			interval = 3600
+
+		retention_text = self.retention_input.text().strip()
+		if retention_text:
+			try:
+				days = float(retention_text)
+				if days <= 0:
+					return None
+				retention_seconds = int(days * 86400)
+
+			except ValueError:
+				return None
+		else:
+			retention_seconds = None
 
 		paths = []
 		for i in range(self.folder_list.count()):
@@ -154,11 +183,16 @@ class AddProfileDialog(QDialog):
 			role = "ground" if i == self.ground_index else "mirror"
 			paths.append({"path": path, "role": role})
 
-		return {
+		profile = {
 			"name": name,
 			"snapshot_interval": interval,
 			"paths": paths
-    }
+		}
+
+		if retention_seconds:
+			profile["retention_seconds"] = retention_seconds
+
+		return profile
 
 
 class ProfileWidget(QGroupBox):
@@ -187,15 +221,29 @@ class ProfileWidget(QGroupBox):
 			layout.addWidget(lbl)
 
 		interval = profile.get("snapshot_interval", 3600)
-		mins = interval // 60
-		if mins >= 60:
-			hours = mins // 60
-			interval_text = f"{hours}h"
+		minutes = interval / 60
+		if minutes >= 60:
+			hours = minutes / 60
+			interval_text = f"{round(hours, 2)}h"
 		else:
-			interval_text = f"{mins}m"
+			interval_text = f"{round(minutes, 2)}m"
 
 		interval_label = QLabel(f"Snapshot interval: {interval_text}")
 		layout.addWidget(interval_label)
+
+		retention = profile.get("retention_seconds")
+		if retention:
+			days = retention / 86400
+			if days >= 1:
+				retention_text = f"{round(days, 2)}d"
+			else:
+				hours = retention / 3600
+				retention_text = f"{round(hours, 2)}h"
+		else:
+			retention_text = "unlimited"
+
+		retention_label = QLabel(f"Retention: {retention_text}")
+		layout.addWidget(retention_label)
 
 		self.status = QLabel("Status: IDLE")
 		self.snapshot_status = QLabel("Snapshot: -")

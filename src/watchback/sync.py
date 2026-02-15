@@ -64,6 +64,53 @@ def last_snapshot_hash(snapshots_dir: Path):
 
 	return snapshot_hash(data)
 
+def parse_ts(name: str):
+    try:
+        return datetime.strptime(name, "%Y-%m-%d_%H-%M-%S").timestamp()
+    except Exception:
+        return None
+
+
+def cleanup_snapshots(mirror: Path, retention_seconds: int):
+    sdir = mirror / "snapshots"
+    if not sdir.exists():
+        return
+
+    cutoff = time.time() - retention_seconds
+
+    for snap in sdir.glob("*.json"):
+        try:
+            if snap.stat().st_mtime < cutoff:
+                snap.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+def cleanup_versions(mirror: Path, retention_seconds: int):
+    vroot = mirror / "versions"
+    if not vroot.exists():
+        return
+
+    cutoff = time.time() - retention_seconds
+
+    for root, _, files in os.walk(vroot):
+        for f in files:
+            ts = parse_ts(f)
+            if ts and ts < cutoff:
+                try:
+                    (Path(root) / f).unlink()
+                except Exception:
+                    pass
+
+
+def apply_retention(mirror: Path, retention_seconds: int):
+    if not retention_seconds:
+        return
+
+    cleanup_snapshots(mirror, retention_seconds)
+    cleanup_versions(mirror, retention_seconds)
+
+
 class MirrorWorker(QThread):
 	status = Signal(str, str)
 	progress = Signal(str, int)
@@ -273,10 +320,10 @@ class ProfileSync:
 
 		now = time.time()
 		age = int(now - self.last_snapshot_time)
-		next_in = int(self.snapshot_interval - age)
 
-		if next_in < 0:
-			next_in = 0
+		intervals_passed = age // self.snapshot_interval
+		next_boundary = self.last_snapshot_time + (intervals_passed + 1) * self.snapshot_interval
+		next_in = int(next_boundary - now)
 
 		def fmt(seconds):
 			minutes = seconds // 60
@@ -311,7 +358,10 @@ class ProfileSync:
 				before = self.last_snapshot_time
 				worker.maybe_create_snapshot()
 
-				# detect if a snapshot was actually created
+				retention = self.profile.get("retention_seconds")
+				if retention:
+					apply_retention(Path(mirror), retention)
+
 				snapshots_dir = Path(mirror) / "snapshots"
 				snaps = sorted(snapshots_dir.glob("*.json"))
 				if snaps:
@@ -327,19 +377,54 @@ class ProfileSync:
 
 
 	def snapshot_loop(self):
-		while not self.snapshot_stop.wait(self.snapshot_interval):
+		while not self.snapshot_stop.is_set():
 			if not self.running:
+				time.sleep(1)
 				continue
+
+			now = time.time()
+
+			if not self.last_snapshot_time:
+				next_time = now
+			else:
+				age = now - self.last_snapshot_time
+				intervals_passed = int(age // self.snapshot_interval)
+				next_time = (
+					self.last_snapshot_time
+					+ (intervals_passed + 1) * self.snapshot_interval
+				)
+
+			sleep_for = max(1, int(next_time - now))
+
+			if self.snapshot_stop.wait(sleep_for):
+				break
+
+			created = False
 
 			for mirror in self.mirrors():
 				try:
 					worker = MirrorWorker(self.ground(), mirror)
-					if worker.should_snapshot(self.snapshot_interval):
-						worker.maybe_create_snapshot()
-						self.last_snapshot_time = time.time()
-						self._emit_snapshot_status()
+					before = self.last_snapshot_time
+
+					worker.maybe_create_snapshot()
+
+					retention = self.profile.get("retention_seconds")
+					if retention:
+						apply_retention(Path(mirror), retention)
+
+					snapshots_dir = Path(mirror) / "snapshots"
+					snaps = sorted(snapshots_dir.glob("*.json"))
+					if snaps:
+						ts = snaps[-1].stat().st_mtime
+						if not self.last_snapshot_time or ts > self.last_snapshot_time:
+							self.last_snapshot_time = ts
+							created = True
+
 				except Exception:
 					pass
+
+			self._emit_snapshot_status()
+
 
 	def start_snapshot_timer(self):
 		if self.snapshot_thread:
@@ -393,7 +478,6 @@ class ProfileSync:
 						if dst.is_dir():
 							shutil.rmtree(dst)
 						else:
-							# version deleted file
 							timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
 							vpath = (
 								mirror
@@ -417,7 +501,6 @@ class ProfileSync:
 			self.workers.remove(worker)
 		worker.deleteLater()
 
-		# If all workers are done, create snapshot and start timer
 		if not self.workers and self.running:
 			self.create_snapshots_now()
 			self.start_snapshot_timer()
@@ -451,14 +534,12 @@ class ProfileSync:
 			worker.start()
 			self.workers.append(worker)
 
-		# Watchdog for incremental updates
 		handler = ChangeHandler(self.sync_single, lambda: self.running)
 		self.observer = Observer()
 		self.observer.schedule(handler, ground, recursive=True)
 		self.observer.start()
 
 		status_cb("SYNCING")
-
 
 
 	def stop(self, status_cb):
