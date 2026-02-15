@@ -1,4 +1,5 @@
 # Watchback
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
 Watchback is a small personal backup tool designed to continuously mirror important folders to one or more destinations without manual intervention. It was built after encountering several unfortunate events of losing valuable data due no backups. The goal of this project is simple: **set up backups once, and stop worrying about them.**
 
