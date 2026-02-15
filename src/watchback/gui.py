@@ -20,9 +20,27 @@ class AddProfileDialog(QDialog):
 
 		self.layout = QVBoxLayout()
 
+		header_style = "color: #9aa0a6;"
+
+		name_label = QLabel("Profile Name")
+		name_label.setStyleSheet(header_style)
+		self.layout.addWidget(name_label)
+
 		self.name_input = QLineEdit()
 		self.name_input.setPlaceholderText("Profile name")
 		self.layout.addWidget(self.name_input)
+
+		interval_label = QLabel("Snapshot Interval (minutes)")
+		interval_label.setStyleSheet(header_style)
+		self.layout.addWidget(interval_label)
+
+		self.interval_input = QLineEdit()
+		self.interval_input.setPlaceholderText("Default: 60")
+		self.layout.addWidget(self.interval_input)
+
+		folders_label = QLabel("Folders (Ground + Mirrors)")
+		folders_label.setStyleSheet(header_style)
+		self.layout.addWidget(folders_label)
 
 		self.folder_list = QListWidget()
 		self.layout.addWidget(self.folder_list)
@@ -75,6 +93,9 @@ class AddProfileDialog(QDialog):
 
 	def load_profile(self, profile):
 		self.name_input.setText(profile["name"])
+		interval = profile.get("snapshot_interval", 3600)
+		minutes = int(interval // 60)
+		self.interval_input.setText(str(minutes))
 		for i, p in enumerate(profile["paths"]):
 			item = QListWidgetItem(p["path"])
 			self.folder_list.addItem(item)
@@ -116,13 +137,28 @@ class AddProfileDialog(QDialog):
 		if self.ground_index is None:
 			return None
 
+		# interval
+		interval_text = self.interval_input.text().strip()
+		if interval_text:
+			try:
+				minutes = int(interval_text)
+				interval = max(60, minutes * 60)  # minimum 1 minute
+			except ValueError:
+				return None
+		else:
+			interval = 3600  # default 1 hour
+
 		paths = []
 		for i in range(self.folder_list.count()):
 			path = self.folder_list.item(i).text().replace("[GROUND] ", "")
 			role = "ground" if i == self.ground_index else "mirror"
 			paths.append({"path": path, "role": role})
 
-		return {"name": name, "paths": paths}
+		return {
+			"name": name,
+			"snapshot_interval": interval,
+			"paths": paths
+    }
 
 
 class ProfileWidget(QGroupBox):
@@ -150,6 +186,16 @@ class ProfileWidget(QGroupBox):
 			self.mirror_labels[m] = lbl
 			layout.addWidget(lbl)
 
+		interval = profile.get("snapshot_interval", 3600)
+		mins = interval // 60
+		if mins >= 60:
+			hours = mins // 60
+			interval_text = f"{hours}h"
+		else:
+			interval_text = f"{mins}m"
+
+		interval_label = QLabel(f"Snapshot interval: {interval_text}")
+		layout.addWidget(interval_label)
 
 		self.status = QLabel("Status: IDLE")
 		self.snapshot_status = QLabel("Snapshot: -")
@@ -165,7 +211,7 @@ class ProfileWidget(QGroupBox):
 		self.edit_btn.clicked.connect(self.edit_profile)
 		btn_row.addWidget(self.edit_btn)
 
-		self.versions_btn = QPushButton("File Versions")
+		self.versions_btn = QPushButton("Versions")
 		self.versions_btn.clicked.connect(self.open_versions)
 		btn_row.addWidget(self.versions_btn)
 
@@ -180,6 +226,8 @@ class ProfileWidget(QGroupBox):
 		self.snapshot_timer = QTimer(self)
 		self.snapshot_timer.setInterval(SNAPSHOT_LABEL_INTERVAL)
 		self.snapshot_timer.timeout.connect(self.refresh_snapshot_label)
+
+		self.set_idle_style()
 
 	def set_running_style(self):
 		self.setStyleSheet("""
@@ -198,6 +246,7 @@ class ProfileWidget(QGroupBox):
 			QGroupBox {
 				background-color: #2b2b2b;
 				border: 1px solid #3c3c3c;
+				border-left: 2px solid #a34a4a;  /* muted red */
 				border-radius: 2px;
 				margin-top: 10px;
 				padding: 10px;
@@ -271,20 +320,27 @@ class ProfileWidget(QGroupBox):
 			self.sync_btn.setText("Stop")
 			self.is_running = True
 			self.snapshot_timer.start()
-			self.edit_btn.setEnabled(False)
 			self.set_running_style()
 		else:
 			self.sync.stop(self.update_status)
 			self.sync_btn.setText("Sync")
 			self.is_running = False
-			self.edit_btn.setEnabled(True)
 			self.set_idle_style()
 
-
+			for path, lbl in self.mirror_labels.items():
+				lbl.setText(f"Mirror: {path} : [ SYNC STOPPED ]")
+				self.mirror_progress[path] = 0
 
 	def edit_profile(self):
-		self.parent_window.edit_profile(self.profile)
+		if self.is_running:
+			QMessageBox.warning(
+				self,
+				"Stop sync first",
+				"You must stop the sync before editing this profile."
+			)
+			return
 
+		self.parent_window.edit_profile(self.profile)
 
 class MainWindow(QWidget):
 	def __init__(self, config):
@@ -384,7 +440,6 @@ class MainWindow(QWidget):
 
 		dialog = AddProfileDialog(self, profile)
 		if dialog.exec():
-			# Delete case
 			if getattr(dialog, "delete_requested", False):
 				if widget and widget.is_running:
 					widget.toggle_sync()

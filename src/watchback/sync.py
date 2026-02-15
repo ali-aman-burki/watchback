@@ -31,8 +31,6 @@ def files_differ(src: Path, dst: Path) -> bool:
 		return True
 	return False
 
-SNAPSHOT_INTERVAL = 60
-
 def build_snapshot(current_root: Path):
 	files = []
 
@@ -85,7 +83,7 @@ class MirrorWorker(QThread):
 		timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
 		return self.mirror / "versions" / rel / timestamp
 
-	def should_snapshot(self):
+	def should_snapshot(self, snapshot_interval):
 		snapshots_dir = self.mirror / "snapshots"
 		if not snapshots_dir.exists():
 			return True
@@ -95,7 +93,7 @@ class MirrorWorker(QThread):
 			return True
 
 		last = snaps[-1].stat().st_mtime
-		return (time.time() - last) > SNAPSHOT_INTERVAL
+		return (time.time() - last) > snapshot_interval
 
 	def maybe_create_snapshot(self):
 		snapshots_dir = self.mirror / "snapshots"
@@ -242,6 +240,7 @@ class ProfileSync:
 		self.snapshot_stop = threading.Event()
 		self.snapshot_status_cb = None
 		self.last_snapshot_time = None
+		self.snapshot_interval = profile.get("snapshot_interval", 3600)
 
 	def load_last_snapshot_time(self):
 		latest_time = None
@@ -274,7 +273,7 @@ class ProfileSync:
 
 		now = time.time()
 		age = int(now - self.last_snapshot_time)
-		next_in = int(SNAPSHOT_INTERVAL - age)
+		next_in = int(self.snapshot_interval - age)
 
 		if next_in < 0:
 			next_in = 0
@@ -328,14 +327,14 @@ class ProfileSync:
 
 
 	def snapshot_loop(self):
-		while not self.snapshot_stop.wait(SNAPSHOT_INTERVAL):
+		while not self.snapshot_stop.wait(self.snapshot_interval):
 			if not self.running:
 				continue
 
 			for mirror in self.mirrors():
 				try:
 					worker = MirrorWorker(self.ground(), mirror)
-					if worker.should_snapshot():
+					if worker.should_snapshot(self.snapshot_interval):
 						worker.maybe_create_snapshot()
 						self.last_snapshot_time = time.time()
 						self._emit_snapshot_status()

@@ -233,6 +233,11 @@ class SnapshotExplorerDialog(QDialog):
 		top_row.addWidget(self.snapshot_combo)
 
 		top_row.addStretch()
+
+		self.toggle_btn = QPushButton("Switch to List View")
+		self.toggle_btn.clicked.connect(self.toggle_view)
+		top_row.addWidget(self.toggle_btn)
+
 		layout.addLayout(top_row)
 
 		splitter = QSplitter()
@@ -245,23 +250,39 @@ class SnapshotExplorerDialog(QDialog):
 		right_panel = QWidget()
 		right_layout = QVBoxLayout(right_panel)
 
+		self.version_list = QListWidget()
+		right_layout.addWidget(self.version_list)
+
+		btn_row = QHBoxLayout()
+
 		self.restore_btn = QPushButton("Restore")
 		self.restore_btn.clicked.connect(self.restore_selected)
-		right_layout.addWidget(self.restore_btn)
+		btn_row.addWidget(self.restore_btn)
 
 		self.download_btn = QPushButton("Download ZIP")
 		self.download_btn.clicked.connect(self.download_selected)
-		right_layout.addWidget(self.download_btn)
+		btn_row.addWidget(self.download_btn)
 
-		right_layout.addStretch()
+		right_layout.addLayout(btn_row)
 		splitter.addWidget(right_panel)
 
 		splitter.setStretchFactor(0, 3)
-		splitter.setStretchFactor(1, 1)
+		splitter.setStretchFactor(1, 2)
 
 		self.current_rel_path = ""
+		self.view_mode = "tree"
 
 		self.load_snapshots()
+
+	def toggle_view(self):
+		if self.view_mode == "tree":
+			self.view_mode = "list"
+			self.toggle_btn.setText("Switch to Tree View")
+		else:
+			self.view_mode = "tree"
+			self.toggle_btn.setText("Switch to List View")
+
+		self.populate_tree()
 
 	def load_snapshots(self):
 		snaps = SnapshotService.list_snapshots(self.mirror)
@@ -298,6 +319,15 @@ class SnapshotExplorerDialog(QDialog):
 		files = SnapshotService.list_snapshot_files(
 			self.mirror, self.snapshot
 		)
+
+		if self.view_mode == "list":
+			for f in sorted(files):
+				item = QTreeWidgetItem([f])
+				item.setData(0, Qt.UserRole, f)
+				self.tree.addTopLevelItem(item)
+
+			self.tree.itemClicked.connect(self.on_item_selected)
+			return
 
 		root = {}
 
