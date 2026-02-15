@@ -138,4 +138,5 @@ It is functional, but not intended to compete with enterprise backup software.
 
 ## License
 
-MIT (or choose your preferred license)
+This project is licensed under the MIT License – see the LICENSE file for details.
+
