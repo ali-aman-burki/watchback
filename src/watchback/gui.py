@@ -6,12 +6,13 @@ from PySide6.QtWidgets import (
 	QWidget, QVBoxLayout, QPushButton, QLabel, QGroupBox,
 	QDialog, QLineEdit, QListWidget, QListWidgetItem,
 	QFileDialog, QHBoxLayout, QMessageBox,
-	QScrollArea, QFrame
+	QScrollArea, QFrame, QSizePolicy
 )
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtGui import QDesktopServices
 
 from watchback.sync import ProfileSync
-from watchback.config import save_config
+from watchback.config import save_config, LOG_PATH
 from watchback.restore_gui import FileVersionDialog, SnapshotExplorerDialog
 
 logger = logging.getLogger("watchback")
@@ -76,12 +77,34 @@ class AddProfileDialog(QDialog):
 
 		save_btn = QPushButton("Save Profile")
 		save_btn.clicked.connect(self.accept)
+		save_btn.setStyleSheet("""
+			QPushButton {
+				background-color: #2563eb;
+				border: 1px solid #2f6fef;
+				font-weight: 600;
+				color: #e7ebf3;
+			}
+			QPushButton:hover {
+				background-color: #2f6fef;
+			}
+		""")
 		self.layout.addWidget(save_btn)
 
-		delete_btn = QPushButton("Delete Profile")
-		delete_btn.clicked.connect(self.delete_profile)
-		delete_btn.setStyleSheet("background-color: #5a1e1e;")
-		self.layout.addWidget(delete_btn)
+		if profile:
+			delete_btn = QPushButton("Delete Profile")
+			delete_btn.clicked.connect(self.delete_profile)
+			delete_btn.setStyleSheet("""
+				QPushButton {
+					background-color: #b91c1c;
+					border: 1px solid #dc2626;
+					font-weight: 600;
+					color: #fef2f2;
+				}
+				QPushButton:hover {
+					background-color: #dc2626;
+				}
+			""")
+			self.layout.addWidget(delete_btn)
 
 		self.profile_to_delete = profile
 		self.delete_requested = False
@@ -579,16 +602,82 @@ class MainWindow(QWidget):
 
 		self.scroll.setWidget(self.scroll_container)
 
-		bottom_row = QHBoxLayout()
-		bottom_row.addStretch()
+		tools_btn_row = QHBoxLayout()
+		self.clear_log_btn = QPushButton("Clear Log")
+		self.clear_log_btn.clicked.connect(self.clear_log)
+		self.clear_log_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+		tools_btn_row.addWidget(self.clear_log_btn)
+
+		self.open_location_btn = QPushButton("Open Location")
+		self.open_location_btn.clicked.connect(self.open_app_data_location)
+		self.open_location_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+		tools_btn_row.addWidget(self.open_location_btn)
 
 		self.add_btn = QPushButton("Add Profile")
 		self.add_btn.clicked.connect(self.add_profile)
-		bottom_row.addWidget(self.add_btn)
+		self.add_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+		self.add_btn.setStyleSheet("""
+			QPushButton {
+				background-color: #2563eb;
+				border: 1px solid #2f6fef;
+				font-weight: 600;
+				color: #e7ebf3;
+			}
+			QPushButton:hover {
+				background-color: #2f6fef;
+			}
+		""")
+		tools_btn_row.addWidget(self.add_btn)
 
-		main_layout.addLayout(bottom_row)
+		main_layout.addLayout(tools_btn_row)
+		self.log_size_timer = QTimer(self)
+		self.log_size_timer.setInterval(5000)
+		self.log_size_timer.timeout.connect(self.refresh_log_size)
+		self.log_size_timer.start()
 
+		self.refresh_log_size()
 		self.refresh_ui()
+
+	@staticmethod
+	def _format_bytes(size):
+		size = float(max(0, size))
+		for unit in ["B", "KB", "MB", "GB", "TB"]:
+			if size < 1024 or unit == "TB":
+				if unit == "B":
+					return f"{int(size)}{unit}"
+				return f"{size:.2f}{unit}"
+			size /= 1024
+
+	def refresh_log_size(self):
+		if LOG_PATH.exists():
+			size_text = self._format_bytes(LOG_PATH.stat().st_size)
+		else:
+			size_text = "0B"
+
+		self.clear_log_btn.setText(f"Clear Log ({size_text})")
+
+	def clear_log(self):
+		confirm = QMessageBox.question(
+			self,
+			"Clear log",
+			"Clear the watchback log file?",
+			QMessageBox.Yes | QMessageBox.No
+		)
+		if confirm != QMessageBox.Yes:
+			return
+
+		LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+		try:
+			with open(LOG_PATH, "w"):
+				pass
+
+			self.refresh_log_size()
+		except Exception as e:
+			QMessageBox.critical(self, "Log clear failed", f"Could not clear log:\n{e}")
+
+	def open_app_data_location(self):
+		if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(LOG_PATH.parent))):
+			QMessageBox.warning(self, "Open failed", f"Could not open:\n{LOG_PATH.parent}")
 
 	def refresh_ui(self):
 		while self.scroll_layout.count():
