@@ -463,7 +463,14 @@ class ProfileWidget(QGroupBox):
 			next_text = "-"
 
 		self.stats_label.setText(
-			f" Snapshot Frequency: {self.interval_text}  |  Last Snapshot: {last_text}  |  Next Snapshot: {next_text}  |  Retention: {self.retention_text}"
+			" <span>Snapshot Frequency: "
+			f"{self.interval_text}</span>"
+			'&nbsp;&nbsp;<span style="color: #e7ebf3; font-weight: 700;">•</span>&nbsp;&nbsp;'
+			f"<span>Last Snapshot: {last_text}</span>"
+			'&nbsp;&nbsp;<span style="color: #e7ebf3; font-weight: 700;">•</span>&nbsp;&nbsp;'
+			f"<span>Next Snapshot: {next_text}</span>"
+			'&nbsp;&nbsp;<span style="color: #e7ebf3; font-weight: 700;">•</span>&nbsp;&nbsp;'
+			f"<span>Retention: {self.retention_text}</span>"
 		)
 
 	def update_mirror_progress(self, path, percent):
