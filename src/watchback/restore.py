@@ -1,3 +1,4 @@
+import os
 import json
 import shutil
 from pathlib import Path
@@ -8,6 +9,29 @@ def object_path(mirror: Path, h: str) -> Path:
     return mirror / "objects" / h[:2] / h
 
 class FileVersionService:
+	@staticmethod
+	def list_all_versioned_files(mirror: str):
+		mirror = Path(mirror)
+		vroot = mirror / "versions"
+
+		if not vroot.exists():
+			return []
+
+		results = []
+
+		for root, _, files in os.walk(vroot):
+			if not files:
+				continue
+
+			root_path = Path(root)
+			rel = root_path.relative_to(vroot)
+
+			# if directory has version files, it represents a file path
+			if any(f.endswith(".json") for f in files):
+				results.append(str(rel))
+
+		return sorted(results, key=str.lower)
+
 	@staticmethod
 	def _version_dir(mirror: Path, rel_path: Path) -> Path:
 		return mirror / "versions" / rel_path

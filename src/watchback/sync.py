@@ -539,34 +539,20 @@ class ProfileSync:
 						dst.mkdir(parents=True, exist_ok=True)
 					else:
 						if files_differ(src, dst):
-							if dst.exists():
-								# version old file
-								timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
-								vpath = (
-									mirror
-									/ "versions"
-									/ rel
-									/ timestamp
-								)
-								vpath.parent.mkdir(parents=True, exist_ok=True)
-								shutil.move(str(dst), str(vpath))
+							if dst.exists() and dst.is_file():
+								version_file(mirror, rel, dst)
 
 							dst.parent.mkdir(parents=True, exist_ok=True)
 							shutil.copy2(src, dst)
+
 				else:
 					if dst.exists():
 						if dst.is_dir():
 							shutil.rmtree(dst)
 						else:
-							timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
-							vpath = (
-								mirror
-								/ "versions"
-								/ rel
-								/ timestamp
-							)
-							vpath.parent.mkdir(parents=True, exist_ok=True)
-							shutil.move(str(dst), str(vpath))
+							version_file(mirror, rel, dst)
+							dst.unlink(missing_ok=True)
+
 			except Exception:
 				pass
 

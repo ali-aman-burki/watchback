@@ -1,5 +1,3 @@
-import os
-
 from PySide6.QtWidgets import (
 	QDialog, QVBoxLayout, QTreeWidget, QTreeWidgetItem,
 	QListWidget, QPushButton, QHBoxLayout, QWidget,
@@ -26,8 +24,6 @@ class FileVersionDialog(QDialog):
 		]
 		self.mirror = self.mirrors[0]
 
-		self.view_mode = "tree"
-
 		layout = QVBoxLayout(self)
 		top_row = QHBoxLayout()
 
@@ -40,10 +36,6 @@ class FileVersionDialog(QDialog):
 		top_row.addWidget(self.mirror_combo)
 
 		top_row.addStretch()
-
-		self.toggle_btn = QPushButton("Switch to List View")
-		self.toggle_btn.clicked.connect(self.toggle_view)
-		top_row.addWidget(self.toggle_btn)
 
 		layout.addLayout(top_row)
 
@@ -97,44 +89,20 @@ class FileVersionDialog(QDialog):
 		self.populate_tree()
 
 	def populate_tree(self):
-		current_root = Path(self.mirror) / "current"
 		self.tree.clear()
 
-		if not current_root.exists():
-			root_item = QTreeWidgetItem(["(no files yet)"])
-			self.tree.addTopLevelItem(root_item)
+		files = FileVersionService.list_all_versioned_files(self.mirror)
+
+		if not files:
+			item = QTreeWidgetItem(["(no versioned files)"])
+			self.tree.addTopLevelItem(item)
 			return
 
-		if self.view_mode == "list":
-			for root, _, files in os.walk(current_root):
-				root_path = Path(root)
-				for f in files:
-					full = root_path / f
-					rel = full.relative_to(current_root)
-					item = QTreeWidgetItem([str(rel)])
-					item.setData(0, Qt.UserRole, str(rel))
-					self.tree.addTopLevelItem(item)
-			return
+		for rel in files:
+			item = QTreeWidgetItem([rel])
+			item.setData(0, Qt.UserRole, rel)
+			self.tree.addTopLevelItem(item)
 
-		def add_items(parent_item, path):
-			for entry in sorted(path.iterdir()):
-				item = QTreeWidgetItem([entry.name])
-				item.setData(
-					0,
-					Qt.UserRole,
-					str(entry.relative_to(current_root))
-				)
-				parent_item.addChild(item)
-
-				if entry.is_dir():
-					add_items(item, entry)
-
-		root_item = QTreeWidgetItem([current_root.name])
-		root_item.setData(0, Qt.UserRole, "")
-		self.tree.addTopLevelItem(root_item)
-
-		add_items(root_item, current_root)
-		self.tree.expandAll()
 
 	def on_file_selected(self, item):
 		rel_path = item.data(0, Qt.UserRole)
@@ -147,7 +115,9 @@ class FileVersionDialog(QDialog):
 
 		self.version_list.clear()
 		for v in reversed(versions):
-			self.version_list.addItem(v)
+			clean = v.replace(".json", "")
+			self.version_list.addItem(clean)
+
 
 		self.current_rel_path = rel_path
 
@@ -156,7 +126,7 @@ class FileVersionDialog(QDialog):
 		if not item or not self.current_rel_path:
 			return
 
-		ts = item.text()
+		ts = item.text() + ".json"
 
 		confirm = QMessageBox.question(
 			self,
@@ -182,7 +152,7 @@ class FileVersionDialog(QDialog):
 		if not item or not self.current_rel_path:
 			return
 
-		ts = item.text()
+		ts = item.text() + ".json"
 
 		out_path, _ = QFileDialog.getSaveFileName(
 			self,
@@ -240,34 +210,24 @@ class SnapshotExplorerDialog(QDialog):
 
 		layout.addLayout(top_row)
 
-		splitter = QSplitter()
-		layout.addWidget(splitter)
-
 		self.tree = QTreeWidget()
 		self.tree.setHeaderLabel("Snapshot")
-		splitter.addWidget(self.tree)
-
-		right_panel = QWidget()
-		right_layout = QVBoxLayout(right_panel)
-
-		self.version_list = QListWidget()
-		right_layout.addWidget(self.version_list)
+		layout.addWidget(self.tree)
 
 		btn_row = QHBoxLayout()
+		btn_row.addStretch()
 
 		self.restore_btn = QPushButton("Restore")
 		self.restore_btn.clicked.connect(self.restore_selected)
 		btn_row.addWidget(self.restore_btn)
 
-		self.download_btn = QPushButton("Download ZIP")
+		self.download_btn = QPushButton("Download")
 		self.download_btn.clicked.connect(self.download_selected)
 		btn_row.addWidget(self.download_btn)
 
-		right_layout.addLayout(btn_row)
-		splitter.addWidget(right_panel)
+		btn_row.addStretch()
+		layout.addLayout(btn_row)
 
-		splitter.setStretchFactor(0, 3)
-		splitter.setStretchFactor(1, 2)
 
 		self.current_rel_path = ""
 		self.view_mode = "tree"
