@@ -1,13 +1,14 @@
 from PySide6.QtWidgets import (
 	QDialog, QVBoxLayout, QTreeWidget, QTreeWidgetItem,
 	QListWidget, QPushButton, QHBoxLayout, QWidget,
-	QSplitter, QMessageBox, QFileDialog, QComboBox, QLabel
+	QSplitter, QMessageBox, QFileDialog, QComboBox, QLabel,
+	QProgressDialog
 )
 from PySide6.QtCore import Qt
 from pathlib import Path
 
 from watchback.restore import FileVersionService, SnapshotService
-
+from watchback.progress import TaskWorker, run_with_progress
 
 class FileVersionDialog(QDialog):
 	def __init__(self, profile, parent=None):
@@ -59,9 +60,9 @@ class FileVersionDialog(QDialog):
 		self.restore_btn.clicked.connect(self.restore_selected)
 		btn_row.addWidget(self.restore_btn)
 
-		self.download_btn = QPushButton("Download")
-		self.download_btn.clicked.connect(self.download_selected)
-		btn_row.addWidget(self.download_btn)
+		self.export_btn = QPushButton("Export")
+		self.export_btn.clicked.connect(self.export_selected)
+		btn_row.addWidget(self.export_btn)
 
 		right_layout.addLayout(btn_row)
 		splitter.addWidget(right_panel)
@@ -138,16 +139,16 @@ class FileVersionDialog(QDialog):
 		if confirm != QMessageBox.Yes:
 			return
 
-		FileVersionService.restore_version(
-			mirror=self.mirror,
-			ground=self.ground,
-			rel_path=self.current_rel_path,
-			timestamp=ts
+		run_with_progress(
+			self,
+			FileVersionService.restore_version,
+			self.mirror,
+			self.ground,
+			self.current_rel_path,
+			ts
 		)
 
-		QMessageBox.information(self, "Done", "File restored to ground.")
-
-	def download_selected(self):
+	def export_selected(self):
 		item = self.version_list.currentItem()
 		if not item or not self.current_rel_path:
 			return
@@ -163,11 +164,13 @@ class FileVersionDialog(QDialog):
 		if not out_path:
 			return
 
-		FileVersionService.export_version(
-			mirror=self.mirror,
-			rel_path=self.current_rel_path,
-			timestamp=ts,
-			out_path=out_path
+		run_with_progress(
+			self,
+			FileVersionService.export_version,
+			self.mirror,
+			self.current_rel_path,
+			ts,
+			out_path
 		)
 
 class SnapshotExplorerDialog(QDialog):
@@ -221,9 +224,9 @@ class SnapshotExplorerDialog(QDialog):
 		self.restore_btn.clicked.connect(self.restore_selected)
 		btn_row.addWidget(self.restore_btn)
 
-		self.download_btn = QPushButton("Download")
-		self.download_btn.clicked.connect(self.download_selected)
-		btn_row.addWidget(self.download_btn)
+		self.export_btn = QPushButton("Export")
+		self.export_btn.clicked.connect(self.export_selected)
+		btn_row.addWidget(self.export_btn)
 
 		btn_row.addStretch()
 		layout.addLayout(btn_row)
@@ -339,36 +342,66 @@ class SnapshotExplorerDialog(QDialog):
 			return
 
 		try:
-			SnapshotService.restore_folder(
-				self.mirror, self.ground, self.snapshot, rel
+			run_with_progress(
+				self,
+				SnapshotService.restore_folder,
+				self.mirror,
+				self.ground,
+				self.snapshot,
+				rel
 			)
-			QMessageBox.information(self, "Done", "Restore completed.")
 		except Exception as e:
 			QMessageBox.warning(self, "Error", str(e))
 
-	def download_selected(self):
+	def export_selected(self):
 		if not self.snapshot:
 			return
 
 		rel = self.current_rel_path or ""
 
-		out_path, _ = QFileDialog.getSaveFileName(
-			self,
-			"Save ZIP",
-			"snapshot.zip",
-			"Zip Files (*.zip)"
-		)
-
-		if not out_path:
-			return
-
 		try:
-			SnapshotService.export_zip(
+			src = SnapshotService.resolve_file(
+				self.mirror, self.snapshot, rel
+			)
+
+			default_name = Path(rel).name
+			out_path, _ = QFileDialog.getSaveFileName(
+				self,
+				"Save File",
+				default_name
+			)
+
+			if not out_path:
+				return
+
+			SnapshotService.export_file(
 				self.mirror,
 				self.snapshot,
 				rel,
-				out_path,
-				profile_name=self.profile["name"]
+				out_path
 			)
-		except Exception as e:
-			QMessageBox.warning(self, "Error", str(e))
+
+		except Exception:
+			out_path, _ = QFileDialog.getSaveFileName(
+				self,
+				"Save ZIP",
+				"snapshot.zip",
+				"Zip Files (*.zip)"
+			)
+
+			if not out_path:
+				return
+
+			try:
+				run_with_progress(
+					self,
+					SnapshotService.export_zip,
+					self.mirror,
+					self.snapshot,
+					rel,
+					out_path,
+					profile_name=self.profile["name"]
+				)
+			except Exception as e:
+				QMessageBox.warning(self, "Error", str(e))
+

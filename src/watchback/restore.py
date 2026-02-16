@@ -55,7 +55,10 @@ class FileVersionService:
 		return mirror / "versions" / rel_path / timestamp
 
 	@staticmethod
-	def restore_version(mirror: str, ground: str, rel_path: str, timestamp: str):
+	def restore_version(mirror: str, ground: str, rel_path: str, timestamp: str, progress_cb=None):
+		if progress_cb:
+			progress_cb(0)
+
 		mirror = Path(mirror)
 		ground = Path(ground)
 		rel_path = Path(rel_path)
@@ -80,8 +83,14 @@ class FileVersionService:
 
 		shutil.copy2(src, dst)
 
+		if progress_cb:
+			progress_cb(100)
+
 	@staticmethod
-	def export_version(mirror: str, rel_path: str, timestamp: str, out_path: str):
+	def export_version(mirror: str, rel_path: str, timestamp: str, out_path: str, progress_cb=None):
+		if progress_cb:
+			progress_cb(0)
+
 		mirror = Path(mirror)
 		rel_path = Path(rel_path)
 
@@ -101,6 +110,9 @@ class FileVersionService:
 			raise FileNotFoundError("Object missing")
 
 		shutil.copy2(src, out_path)
+
+		if progress_cb:
+			progress_cb(100)
 
 class SnapshotService:
 	@staticmethod
@@ -171,7 +183,7 @@ class SnapshotService:
 		shutil.copy2(src, dst)
 
 	@staticmethod
-	def restore_folder(mirror: str, ground: str, snapshot_ts: str, rel_path: str):
+	def restore_folder(mirror: str, ground: str, snapshot_ts: str, rel_path: str, progress_cb=None):
 		mirror = Path(mirror)
 		ground = Path(ground)
 		rel_path = Path(rel_path)
@@ -180,15 +192,25 @@ class SnapshotService:
 		files = snap["files"]
 
 		targets = SnapshotService._files_under_path(files, rel_path)
+		total = max(1, len(targets))
 
-		for f in targets:
+		for i, f in enumerate(targets, 1):
 			src = SnapshotService.resolve_file(mirror, snapshot_ts, f)
 			dst = ground / f
 			dst.parent.mkdir(parents=True, exist_ok=True)
 			shutil.copy2(src, dst)
 
+			if progress_cb:
+				percent = int((i / total) * 100)
+				progress_cb(percent)
+
 	@staticmethod
-	def export_zip(mirror: str, snapshot_ts: str, rel_path: str, out_zip: str, profile_name: str = "snapshot"):
+	def export_file(mirror: str, snapshot_ts: str, rel_path: str, out_path: str):
+		src = SnapshotService.resolve_file(mirror, snapshot_ts, rel_path)
+		shutil.copy2(src, out_path)
+
+	@staticmethod
+	def export_zip(mirror: str, snapshot_ts: str, rel_path: str, out_zip: str, profile_name: str = "snapshot", progress_cb=None):
 		mirror = Path(mirror)
 		rel_path = Path(rel_path)
 
@@ -196,12 +218,10 @@ class SnapshotService:
 		files = snap["files"]
 
 		targets = SnapshotService._files_under_path(files, rel_path)
-
 		if not targets:
 			raise FileNotFoundError("Nothing to export")
 
 		rel_str = str(rel_path).strip("/.")
-
 		if rel_str in ("", ".", "./"):
 			root_name = profile_name
 			base_prefix = ""
@@ -209,8 +229,10 @@ class SnapshotService:
 			root_name = Path(rel_str).name
 			base_prefix = rel_str + "/"
 
+		total = len(targets)
+
 		with ZipFile(out_zip, "w", ZIP_DEFLATED) as zf:
-			for f in targets:
+			for i, f in enumerate(targets, 1):
 				src = SnapshotService.resolve_file(mirror, snapshot_ts, f)
 
 				if base_prefix and f.startswith(base_prefix):
@@ -221,6 +243,10 @@ class SnapshotService:
 				arcname = f"{root_name}/{inner}"
 				zf.write(src, arcname=arcname)
 
+				if progress_cb:
+					percent = int((i / total) * 100)
+					progress_cb(percent)
+
 			info_text = (
 				"Watchback Snapshot Export\n"
 				"-------------------------\n"
@@ -228,9 +254,7 @@ class SnapshotService:
 				f"Snapshot: {snapshot_ts}\n"
 				f"Exported: {datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}\n"
 			)
-
 			zf.writestr("snapshot_info.txt", info_text)
-
 
 	@staticmethod
 	def list_snapshot_files(mirror: str, snapshot_ts: str):
