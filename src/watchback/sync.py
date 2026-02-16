@@ -390,7 +390,8 @@ class ProfileSync:
 		)
 		self.snapshot_interval = profile.get("snapshot_interval", 3600)
 
-	def _parse_snapshot_time(self, value):
+	@staticmethod
+	def _parse_snapshot_time(value):
 		try:
 			if value is None:
 				return None

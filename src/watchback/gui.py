@@ -423,7 +423,8 @@ class ProfileWidget(QGroupBox):
 			self.sync._emit_snapshot_status()
 		self.refresh_stats_row()
 
-	def _format_duration(self, seconds):
+	@staticmethod
+	def _format_duration(seconds):
 		seconds = max(0, int(seconds))
 		minutes = seconds // 60
 		hours = minutes // 60

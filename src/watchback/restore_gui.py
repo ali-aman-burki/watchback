@@ -2,13 +2,12 @@ from PySide6.QtWidgets import (
 	QDialog, QVBoxLayout, QTreeWidget, QTreeWidgetItem,
 	QListWidget, QPushButton, QHBoxLayout, QWidget,
 	QSplitter, QMessageBox, QFileDialog, QComboBox, QLabel,
-	QProgressDialog
 )
 from PySide6.QtCore import Qt
 from pathlib import Path
 
 from watchback.restore import FileVersionService, SnapshotService
-from watchback.progress import TaskWorker, run_with_progress
+from watchback.progress import run_with_progress
 
 class FileVersionDialog(QDialog):
 	def __init__(self, profile, parent=None):
@@ -350,7 +349,7 @@ class SnapshotExplorerDialog(QDialog):
 		rel = self.current_rel_path or ""
 
 		try:
-			src = SnapshotService.resolve_file(
+			SnapshotService.resolve_file(
 				self.mirror, self.snapshot, rel
 			)
 
@@ -396,4 +395,3 @@ class SnapshotExplorerDialog(QDialog):
 				)
 			except Exception as e:
 				QMessageBox.warning(self, "Error", str(e))
-
