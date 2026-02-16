@@ -270,7 +270,7 @@ class ProfileWidget(QGroupBox):
 				hours = retention / 3600
 				self.retention_text = f"{round(hours, 2)}h"
 		else:
-			self.retention_text = "unlimited"
+			self.retention_text = "Unlimited"
 
 		self.status_text = "IDLE"
 		stats_header = QLabel("Stats")
@@ -463,7 +463,7 @@ class ProfileWidget(QGroupBox):
 			next_text = "-"
 
 		self.stats_label.setText(
-			" <span>Snapshot Frequency: "
+			"&nbsp;<span>Snapshot Frequency: "
 			f"{self.interval_text}</span>"
 			'&nbsp;&nbsp;<span style="color: #e7ebf3; font-weight: 700;">•</span>&nbsp;&nbsp;'
 			f"<span>Last Snapshot: {last_text}</span>"
