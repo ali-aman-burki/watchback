@@ -248,7 +248,7 @@ class MirrorWorker(QThread):
 		old_hash = last_snapshot_hash(snapshots_dir)
 
 		if new_hash == old_hash:
-			return 
+			return None
 
 		ts = snapshot["timestamp"]
 		path = snapshots_dir / f"{ts}.json"
@@ -257,6 +257,7 @@ class MirrorWorker(QThread):
 			json.dump(snapshot, f, indent=2)
 		
 		logger.info(f"Snapshot created: {path}")
+		return path.stat().st_mtime
 
 	def stop(self):
 		self._stop_event.set()
@@ -375,19 +376,51 @@ class ChangeHandler(FileSystemEventHandler):
 				self.timer.start()
 
 class ProfileSync:
-	def __init__(self, profile):
+	def __init__(self, profile, on_profile_change=None):
 		self.profile = profile
+		self.on_profile_change = on_profile_change
 		self.workers = []
 		self.observer = None
 		self.running = False
 		self.snapshot_thread = None
 		self.snapshot_stop = threading.Event()
 		self.snapshot_status_cb = None
-		self.last_snapshot_time = None
+		self.last_snapshot_time = self._parse_snapshot_time(
+			profile.get("last_snapshot_time")
+		)
 		self.snapshot_interval = profile.get("snapshot_interval", 3600)
 
+	def _parse_snapshot_time(self, value):
+		try:
+			if value is None:
+				return None
+			return float(value)
+		except (TypeError, ValueError):
+			return None
+
+	def _set_last_snapshot_time(self, ts):
+		ts = self._parse_snapshot_time(ts)
+		if ts is None:
+			return False
+
+		if self.last_snapshot_time is not None and ts <= self.last_snapshot_time:
+			return False
+
+		self.last_snapshot_time = ts
+		self.profile["last_snapshot_time"] = ts
+
+		if self.on_profile_change:
+			try:
+				self.on_profile_change()
+			except Exception as e:
+				logger.warning(f"Failed to persist profile update: {e}")
+
+		return True
+
 	def load_last_snapshot_time(self):
-		latest_time = None
+		latest_time = self._parse_snapshot_time(
+			self.profile.get("last_snapshot_time")
+		)
 
 		for mirror in self.mirrors():
 			snapshots_dir = Path(mirror) / "snapshots"
@@ -404,7 +437,9 @@ class ProfileSync:
 			if latest_time is None or ts > latest_time:
 				latest_time = ts
 
-		self.last_snapshot_time = latest_time
+		if latest_time is not None:
+			self.last_snapshot_time = latest_time
+			self.profile["last_snapshot_time"] = latest_time
 
 
 	def _emit_snapshot_status(self):
@@ -452,20 +487,13 @@ class ProfileSync:
 		for mirror in self.mirrors():
 			try:
 				worker = MirrorWorker(self.ground(), mirror)
-				before = self.last_snapshot_time
-				worker.maybe_create_snapshot()
+				snapshot_time = worker.maybe_create_snapshot()
+				if snapshot_time is not None:
+					created = self._set_last_snapshot_time(snapshot_time) or created
 
 				retention = self.profile.get("retention_seconds")
 				if retention:
 					apply_retention(Path(mirror), retention)
-
-				snapshots_dir = Path(mirror) / "snapshots"
-				snaps = sorted(snapshots_dir.glob("*.json"))
-				if snaps:
-					ts = snaps[-1].stat().st_mtime
-					if not self.last_snapshot_time or ts > self.last_snapshot_time:
-						self.last_snapshot_time = ts
-						created = True
 			except Exception:
 				pass
 
@@ -501,21 +529,14 @@ class ProfileSync:
 			for mirror in self.mirrors():
 				try:
 					worker = MirrorWorker(self.ground(), mirror)
-					before = self.last_snapshot_time
 
-					worker.maybe_create_snapshot()
+					snapshot_time = worker.maybe_create_snapshot()
+					if snapshot_time is not None:
+						created = self._set_last_snapshot_time(snapshot_time) or created
 
 					retention = self.profile.get("retention_seconds")
 					if retention:
 						apply_retention(Path(mirror), retention)
-
-					snapshots_dir = Path(mirror) / "snapshots"
-					snaps = sorted(snapshots_dir.glob("*.json"))
-					if snaps:
-						ts = snaps[-1].stat().st_mtime
-						if not self.last_snapshot_time or ts > self.last_snapshot_time:
-							self.last_snapshot_time = ts
-							created = True
 
 				except Exception:
 					pass

@@ -1,4 +1,6 @@
 import logging
+import time
+from datetime import datetime
 
 from PySide6.QtWidgets import (
 	QWidget, QVBoxLayout, QPushButton, QLabel, QGroupBox,
@@ -199,61 +201,91 @@ class AddProfileDialog(QDialog):
 
 class ProfileWidget(QGroupBox):
 	def __init__(self, profile, parent_window):
-		super().__init__(profile["name"])
+		super().__init__()
 		self.profile = profile
 		self.parent_window = parent_window
-		self.sync = ProfileSync(profile)
+		self.sync = ProfileSync(
+			profile,
+			on_profile_change=self.parent_window.persist_config
+		)
 		self.mirror_progress = {}
+		self.setTitle("")
+		self.setObjectName("profileCard")
 
 		layout = QVBoxLayout()
+		layout.setContentsMargins(10, 10, 10, 10)
+		layout.setSpacing(6)
+
+		header_row = QHBoxLayout()
+		header_row.setContentsMargins(0, 0, 0, 0)
+		header_row.setSpacing(8)
+		self.title_label = QLabel(profile["name"])
+		self.title_label.setObjectName("profileTitle")
+		header_row.addWidget(self.title_label)
 
 		ground = next(
 			p["path"] for p in profile["paths"] if p["role"] == "ground"
 		)
-		ground_label = QLabel(f"Ground: {ground}")
-		layout.addWidget(ground_label)
+		self.ground_path_label = QLabel(ground)
+		self.ground_path_label.setObjectName("groundPath")
+		self.ground_path_label.setWordWrap(False)
+		header_row.addWidget(self.ground_path_label)
+		header_row.addStretch()
+		self.status_chip = QLabel("IDLE")
+		self.status_chip.setObjectName("statusChip")
+		header_row.addWidget(self.status_chip)
+		layout.addLayout(header_row)
+		layout.addSpacing(6)
 
 		self.mirror_labels = {}
 		mirrors = [
 			p["path"] for p in profile["paths"] if p["role"] == "mirror"
 		]
+		mirror_header = QLabel("Mirrors")
+		mirror_header.setObjectName("sectionHeader")
+		layout.addWidget(mirror_header)
+
 		for m in mirrors:
-			lbl = QLabel(f"Mirror: {m} : IDLE")
+			lbl = QLabel(f"{m}  [ IDLE ]")
+			lbl.setObjectName("mirrorPath")
+			lbl.setWordWrap(True)
 			self.mirror_labels[m] = lbl
 			layout.addWidget(lbl)
+		layout.addSpacing(6)
 
 		interval = profile.get("snapshot_interval", 3600)
 		minutes = interval / 60
 		if minutes >= 60:
 			hours = minutes / 60
-			interval_text = f"{round(hours, 2)}h"
+			self.interval_text = f"{round(hours, 2)}h"
 		else:
-			interval_text = f"{round(minutes, 2)}m"
-
-		interval_label = QLabel(f"Snapshot interval: {interval_text}")
-		layout.addWidget(interval_label)
+			self.interval_text = f"{round(minutes, 2)}m"
 
 		retention = profile.get("retention_seconds")
 		if retention:
 			days = retention / 86400
 			if days >= 1:
-				retention_text = f"{round(days, 2)}d"
+				self.retention_text = f"{round(days, 2)}d"
 			else:
 				hours = retention / 3600
-				retention_text = f"{round(hours, 2)}h"
+				self.retention_text = f"{round(hours, 2)}h"
 		else:
-			retention_text = "unlimited"
+			self.retention_text = "unlimited"
 
-		retention_label = QLabel(f"Retention: {retention_text}")
-		layout.addWidget(retention_label)
-
-		self.status = QLabel("Status: IDLE")
-		self.snapshot_status = QLabel("Snapshot: -")
-		layout.addWidget(self.snapshot_status)
+		self.status_text = "IDLE"
+		stats_header = QLabel("Stats")
+		stats_header.setObjectName("sectionHeader")
+		layout.addWidget(stats_header)
+		self.stats_label = QLabel()
+		self.stats_label.setObjectName("statsLabel")
+		layout.addWidget(self.stats_label)
 
 		btn_row = QHBoxLayout()
+		btn_row.setContentsMargins(0, 2, 0, 0)
+		btn_row.setSpacing(8)
 
 		self.sync_btn = QPushButton("Sync")
+		self.sync_btn.setObjectName("primaryBtn")
 		self.sync_btn.clicked.connect(self.toggle_sync)
 		btn_row.addWidget(self.sync_btn)
 
@@ -277,30 +309,89 @@ class ProfileWidget(QGroupBox):
 		self.snapshot_timer.setInterval(SNAPSHOT_LABEL_INTERVAL)
 		self.snapshot_timer.timeout.connect(self.refresh_snapshot_label)
 
+		self.refresh_stats_row()
 		self.set_idle_style()
 
 	def set_running_style(self):
+		self.status_chip.setText("RUNNING")
+		self.status_chip.setProperty("state", "running")
+		self.status_chip.style().unpolish(self.status_chip)
+		self.status_chip.style().polish(self.status_chip)
 		self.setStyleSheet("""
-			QGroupBox {
-				background-color: #2b2b2b;
-				border: 1px solid #3c3c3c;
-				border-left: 2px solid #3fb950;  /* green */
-				border-radius: 2px;
-				margin-top: 10px;
-				padding: 10px;
+			QGroupBox#profileCard {
+				background-color: #252a33;
+				border: 1px solid #404858;
+				border-left: 2px solid #3fb950;
+				border-radius: 7px;
 			}
+			QLabel { background-color: transparent; }
+			QLabel#profileTitle { color: #f2f4f8; font-size: 14px; font-weight: 700; }
+			QLabel#sectionHeader { color: #94a3b8; font-size: 10px; text-transform: uppercase; }
+			QLabel#groundPath { color: #94a3b8; font-size: 12px; }
+			QLabel#mirrorPath { color: #cbd5e1; font-size: 12px; padding: 1px 0; }
+			QLabel#statsLabel { color: #b8c6da; font-size: 12px; }
+			QLabel#statusChip {
+				padding: 2px 7px;
+				border-radius: 10px;
+				color: #84e1a1;
+				font-size: 10px;
+				font-weight: 700;
+			}
+			QPushButton {
+				background-color: #333a46;
+				border: 1px solid #4a5365;
+				border-radius: 6px;
+				padding: 4px 9px;
+				color: #e7ebf3;
+			}
+			QPushButton:hover { background-color: #3b4351; }
+			QPushButton#primaryBtn {
+				background-color: #2563eb;
+				border-color: #2f6fef;
+				font-weight: 600;
+			}
+			QPushButton#primaryBtn:hover { background-color: #2f6fef; }
 		""")
 
 	def set_idle_style(self):
+		self.status_chip.setText("IDLE")
+		self.status_chip.setProperty("state", "idle")
+		self.status_chip.style().unpolish(self.status_chip)
+		self.status_chip.style().polish(self.status_chip)
 		self.setStyleSheet("""
-			QGroupBox {
-				background-color: #2b2b2b;
-				border: 1px solid #3c3c3c;
-				border-left: 2px solid #a34a4a;  /* muted red */
-				border-radius: 2px;
-				margin-top: 10px;
-				padding: 10px;
+			QGroupBox#profileCard {
+				background-color: #252a33;
+				border: 1px solid #404858;
+				border-left: 2px solid #a34a4a;
+				border-radius: 7px;
 			}
+			QLabel { background-color: transparent; }
+			QLabel#profileTitle { color: #f2f4f8; font-size: 14px; font-weight: 700; }
+			QLabel#sectionHeader { color: #94a3b8; font-size: 10px; text-transform: uppercase; }
+			QLabel#groundPath { color: #94a3b8; font-size: 12px; }
+			QLabel#mirrorPath { color: #cbd5e1; font-size: 12px; padding: 1px 0; }
+			QLabel#statsLabel { color: #b8c6da; font-size: 12px; }
+			QLabel#statusChip {
+				padding: 2px 7px;
+				border-radius: 10px;
+				color: #f3a8b5;
+				font-size: 10px;
+				font-weight: 700;
+			}
+			QPushButton {
+				background-color: #333a46;
+				border: 1px solid #4a5365;
+				border-radius: 6px;
+				padding: 4px 9px;
+				color: #e7ebf3;
+			}
+			QPushButton:hover { background-color: #3b4351; }
+			QPushButton#primaryBtn {
+				background-color: #2563eb;
+				border-color: #2f6fef;
+				font-weight: 600;
+			}
+			QPushButton#primaryBtn:hover { background-color: #2f6fef; }
 		""")
 
 	def open_snapshots(self):
@@ -330,12 +421,55 @@ class ProfileWidget(QGroupBox):
 	def refresh_snapshot_label(self):
 		if hasattr(self.sync, "_emit_snapshot_status"):
 			self.sync._emit_snapshot_status()
+		self.refresh_stats_row()
+
+	def _format_duration(self, seconds):
+		seconds = max(0, int(seconds))
+		minutes = seconds // 60
+		hours = minutes // 60
+		minutes = minutes % 60
+		days = hours // 24
+		hours = hours % 24
+
+		if days > 0:
+			return f"{days}d {hours}h"
+		if hours > 0:
+			return f"{hours}h {minutes}m"
+		return f"{minutes}m"
+
+	def refresh_stats_row(self):
+		last_snapshot_time = self.sync.last_snapshot_time
+		if last_snapshot_time:
+			last_dt = datetime.fromtimestamp(last_snapshot_time).strftime("%b %d %H:%M")
+			if self.is_running:
+				age = int(max(0, time.time() - last_snapshot_time))
+				last_text = f"{last_dt}"
+			else:
+				last_text = last_dt
+		else:
+			last_text = "-"
+
+		if self.is_running and last_snapshot_time:
+			now = time.time()
+			age = int(now - last_snapshot_time)
+			intervals_passed = age // self.sync.snapshot_interval
+			next_boundary = last_snapshot_time + (intervals_passed + 1) * self.sync.snapshot_interval
+			next_in = int(next_boundary - now)
+			next_text = self._format_duration(next_in)
+		elif self.is_running:
+			next_text = "pending"
+		else:
+			next_text = "-"
+
+		self.stats_label.setText(
+			f" Snapshot Frequency: {self.interval_text}  |  Last Snapshot: {last_text}  |  Next Snapshot: {next_text}  |  Retention: {self.retention_text}"
+		)
 
 	def update_mirror_progress(self, path, percent):
 		if path in self.mirror_labels:
 			self.mirror_progress[path] = percent
 			self.mirror_labels[path].setText(
-				f"Mirror: {path} : [ SYNCING {percent}% ]"
+				f"{path}  [ SYNCING {percent}% ]"
 			)
 
 	def update_mirror_status(self, path, text):
@@ -351,36 +485,51 @@ class ProfileWidget(QGroupBox):
 			else:
 				label = f"[ {text} ]"
 
-			self.mirror_labels[path].setText(f"Mirror: {path} : {label}")
+			self.mirror_labels[path].setText(f"{path}  {label}")
 
 	def update_status(self, text):
-		self.status.setText(f"Status: {text}")
+		self.status_text = text
+		self.refresh_stats_row()
 
 	def update_snapshot_status(self, text):
-		self.snapshot_status.setText(f"Snapshot: {text}")
+		self.refresh_stats_row()
 
 	def toggle_sync(self):
 		if not self.is_running:
-			self.sync.start(
-				self.update_status,
-				self.update_mirror_status,
-				self.update_mirror_progress,
-				self.update_snapshot_status
-			)
-			self.sync_btn.setText("Stop")
 			self.is_running = True
+			try:
+				self.sync.start(
+					self.update_status,
+					self.update_mirror_status,
+					self.update_mirror_progress,
+					self.update_snapshot_status
+				)
+			except Exception as e:
+				self.is_running = False
+				logger.exception(f"Failed to start sync for profile {self.profile['name']}: {e}")
+				QMessageBox.critical(
+					self,
+					"Failed to start sync",
+					f"Could not start sync for '{self.profile['name']}'.\n{e}"
+				)
+				return
+
+			self.sync_btn.setText("Stop")
 			logger.info(f"Sync started for profile: {self.profile['name']}")
 			self.snapshot_timer.start()
 			self.set_running_style()
+			self.refresh_stats_row()
 		else:
 			self.sync.stop(self.update_status)
 			self.sync_btn.setText("Sync")
 			self.is_running = False
 			logger.info(f"Sync stopped for profile: {self.profile['name']}")
+			self.snapshot_timer.stop()
 			self.set_idle_style()
+			self.refresh_stats_row()
 
 			for path, lbl in self.mirror_labels.items():
-				lbl.setText(f"Mirror: {path} : [ SYNC STOPPED ]")
+				lbl.setText(f"{path}  [ SYNC STOPPED ]")
 				self.mirror_progress[path] = 0
 
 	def edit_profile(self):
@@ -518,6 +667,9 @@ class MainWindow(QWidget):
 				)
 				return
 
+			if "last_snapshot_time" in profile:
+				new_profile["last_snapshot_time"] = profile["last_snapshot_time"]
+
 			for i, p in enumerate(self.config["profiles"]):
 				if p is profile:
 					self.config["profiles"][i] = new_profile
@@ -536,4 +688,5 @@ class MainWindow(QWidget):
 				self.profile_widgets.append(new_widget)
 				self.scroll_layout.insertWidget(index, new_widget)
 
-
+	def persist_config(self):
+		save_config(self.config)
