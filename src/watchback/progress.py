@@ -1,7 +1,6 @@
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QProgressDialog, QMessageBox
 from PySide6.QtCore import Qt
-from PySide6.QtCore import QTimer
 
 class TaskWorker(QThread):
 	progress = Signal(int)

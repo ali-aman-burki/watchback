@@ -79,16 +79,6 @@ class FileVersionDialog(QDialog):
 		self.version_list.clear()
 		self.populate_tree()
 
-	def toggle_view(self):
-		if self.view_mode == "tree":
-			self.view_mode = "list"
-			self.toggle_btn.setText("Switch to Tree View")
-		else:
-			self.view_mode = "tree"
-			self.toggle_btn.setText("Switch to List View")
-
-		self.populate_tree()
-
 	def populate_tree(self):
 		self.tree.clear()
 
@@ -374,7 +364,9 @@ class SnapshotExplorerDialog(QDialog):
 			if not out_path:
 				return
 
-			SnapshotService.export_file(
+			run_with_progress(
+				self,
+				SnapshotService.export_file,
 				self.mirror,
 				self.snapshot,
 				rel,

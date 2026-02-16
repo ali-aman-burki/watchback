@@ -1,4 +1,4 @@
-from datetime import datetime
+import logging
 
 from PySide6.QtWidgets import (
 	QWidget, QVBoxLayout, QPushButton, QLabel, QGroupBox,
@@ -11,6 +11,8 @@ from PySide6.QtCore import Qt, QTimer
 from watchback.sync import ProfileSync
 from watchback.config import save_config
 from watchback.restore_gui import FileVersionDialog, SnapshotExplorerDialog
+
+logger = logging.getLogger("watchback")
 
 SNAPSHOT_LABEL_INTERVAL = 60000
 
@@ -367,12 +369,14 @@ class ProfileWidget(QGroupBox):
 			)
 			self.sync_btn.setText("Stop")
 			self.is_running = True
+			logger.info(f"Sync started for profile: {self.profile['name']}")
 			self.snapshot_timer.start()
 			self.set_running_style()
 		else:
 			self.sync.stop(self.update_status)
 			self.sync_btn.setText("Sync")
 			self.is_running = False
+			logger.info(f"Sync stopped for profile: {self.profile['name']}")
 			self.set_idle_style()
 
 			for path, lbl in self.mirror_labels.items():
@@ -461,6 +465,7 @@ class MainWindow(QWidget):
 
 			self.config["profiles"].append(profile)
 			save_config(self.config)
+			logger.info(f"Profile added: {profile['name']}")
 
 			widget = ProfileWidget(profile, self)
 			self.profile_widgets.append(widget)
@@ -496,6 +501,7 @@ class MainWindow(QWidget):
 					p for p in self.config["profiles"] if p is not profile
 				]
 				save_config(self.config)
+				logger.info(f"Profile deleted: {profile['name']}")
 
 				if widget:
 					self.profile_widgets.remove(widget)
@@ -518,6 +524,8 @@ class MainWindow(QWidget):
 					break
 
 			save_config(self.config)
+			logger.info(f"Profile updated: {new_profile['name']}")
+
 
 			if widget:
 				index = self.scroll_layout.indexOf(widget)

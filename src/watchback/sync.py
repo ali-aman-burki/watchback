@@ -1,9 +1,10 @@
 import os
-import shutil
-import threading
-import time
 import json
+import time
+import shutil
+import logging
 import hashlib
+import threading
 
 from pathlib import Path
 from datetime import datetime
@@ -11,6 +12,8 @@ from datetime import datetime
 from PySide6.QtCore import QThread, Signal
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+
+logger = logging.getLogger("watchback")
 
 def file_hash(path: Path, chunk_size=1024 * 1024):
 	h = hashlib.sha256()
@@ -74,6 +77,8 @@ def gc_objects(mirror: Path):
 				except Exception:
 					pass
 
+	removed = 0
+
 	for root, _, files in os.walk(objects_root):
 		for f in files:
 			obj = Path(root) / f
@@ -81,8 +86,12 @@ def gc_objects(mirror: Path):
 			if h not in live_hashes:
 				try:
 					obj.unlink()
-				except Exception:
-					pass
+					removed += 1
+				except Exception as e:
+					logger.warning(f"Failed to delete object {obj}: {e}")
+
+	if removed:
+		logger.info(f"Garbage collection removed {removed} unreferenced objects from {mirror}")
 
 def version_file(mirror: Path, rel_path: Path, dst: Path):
 	if not dst.exists() or dst.is_dir():
@@ -100,7 +109,8 @@ def version_file(mirror: Path, rel_path: Path, dst: Path):
 			"hash": h,
 			"size": dst.stat().st_size
 		}, f)
-
+	
+	logger.info(f"Version created: {rel_path}")
 
 def files_differ(src: Path, dst: Path) -> bool:
 	if not dst.exists():
@@ -156,13 +166,19 @@ def cleanup_snapshots(mirror: Path, retention_seconds: int):
 		return
 
 	cutoff = time.time() - retention_seconds
+	removed = 0
 
 	for snap in sdir.glob("*.json"):
 		try:
 			if snap.stat().st_mtime < cutoff:
 				snap.unlink(missing_ok=True)
-		except Exception:
-			pass
+				removed += 1
+		except Exception as e:
+			logger.warning(f"Failed to delete snapshot {snap}: {e}")
+
+	if removed:
+		logger.info(f"Removed {removed} old snapshots from {mirror}")
+
 
 
 def cleanup_versions(mirror: Path, retention_seconds: int):
@@ -171,6 +187,7 @@ def cleanup_versions(mirror: Path, retention_seconds: int):
 		return
 
 	cutoff = time.time() - retention_seconds
+	removed = 0
 
 	for root, _, files in os.walk(vroot):
 		for f in files:
@@ -178,9 +195,12 @@ def cleanup_versions(mirror: Path, retention_seconds: int):
 			if ts and ts < cutoff:
 				try:
 					(Path(root) / f).unlink()
-				except Exception:
-					pass
+					removed += 1
+				except Exception as e:
+					logger.warning(f"Failed to delete version {f}: {e}")
 
+	if removed:
+		logger.info(f"Removed {removed} old versions from {mirror}")
 
 def apply_retention(mirror: Path, retention_seconds: int):
 	if not retention_seconds:
@@ -204,11 +224,6 @@ class MirrorWorker(QThread):
 
 	def current_root(self):
 		return self.mirror / "current"
-
-	def version_path(self, path: Path) -> Path:
-		rel = path.relative_to(self.current_root())
-		timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
-		return self.mirror / "versions" / rel / timestamp
 
 	def should_snapshot(self, snapshot_interval):
 		snapshots_dir = self.mirror / "snapshots"
@@ -240,12 +255,14 @@ class MirrorWorker(QThread):
 
 		with open(path, "w") as f:
 			json.dump(snapshot, f, indent=2)
-
+		
+		logger.info(f"Snapshot created: {path}")
 
 	def stop(self):
 		self._stop_event.set()
 
 	def run(self):
+		logger.info(f"Mirror sync started: {self.mirror}")
 		try:
 			self.status.emit(str(self.mirror), "SYNCING")
 			self.sync_full()
@@ -255,12 +272,12 @@ class MirrorWorker(QThread):
 				self.status.emit(str(self.mirror), "SYNCED")
 			else:
 				self.status.emit(str(self.mirror), "SYNCED")
-
+			logger.info(f"Mirror sync completed: {self.mirror}")
 		except Exception as e:
 			self.status.emit(str(self.mirror), f"ERROR: {e}")
+			logger.error(f"Mirror sync error ({self.mirror}): {e}")
 		finally:
 			self.finished.emit(str(self.mirror))
-
 
 	def sync_full(self):
 		src_files = []
@@ -607,6 +624,7 @@ class ProfileSync:
 
 		status_cb("SYNCING")
 
+		logger.info(f"Profile sync engine started: {self.profile['name']}")
 
 	def stop(self, status_cb):
 		self.running = False
@@ -641,4 +659,5 @@ class ProfileSync:
 			else:
 				self.snapshot_status_cb("stopped")
 
+		logger.info(f"Profile sync engine stopped: {self.profile['name']}")
 		

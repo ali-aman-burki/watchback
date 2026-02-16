@@ -1,9 +1,12 @@
 import os
 import json
 import shutil
+import logging
 from pathlib import Path
 from datetime import datetime
 from zipfile import ZipFile, ZIP_DEFLATED
+
+logger = logging.getLogger("watchback")
 
 def object_path(mirror: Path, h: str) -> Path:
     return mirror / "objects" / h[:2] / h
@@ -26,7 +29,6 @@ class FileVersionService:
 			root_path = Path(root)
 			rel = root_path.relative_to(vroot)
 
-			# if directory has version files, it represents a file path
 			if any(f.endswith(".json") for f in files):
 				results.append(str(rel))
 
@@ -85,6 +87,8 @@ class FileVersionService:
 
 		if progress_cb:
 			progress_cb(100)
+		
+		logger.info(f"Version restored: {rel_path} @ {timestamp}")
 
 	@staticmethod
 	def export_version(mirror: str, rel_path: str, timestamp: str, out_path: str, progress_cb=None):
@@ -113,6 +117,8 @@ class FileVersionService:
 
 		if progress_cb:
 			progress_cb(100)
+		
+		logger.info(f"Version exported: {rel_path} @ {timestamp} -> {out_path}")
 
 class SnapshotService:
 	@staticmethod
@@ -171,7 +177,10 @@ class SnapshotService:
 		return obj
 
 	@staticmethod
-	def restore_file(mirror: str, ground: str, snapshot_ts: str, rel_path: str):
+	def restore_file(mirror: str, ground: str, snapshot_ts: str, rel_path: str, progress_cb=None):
+		if progress_cb:
+			progress_cb(0)
+
 		mirror = Path(mirror)
 		ground = Path(ground)
 		rel_path = Path(rel_path)
@@ -181,6 +190,11 @@ class SnapshotService:
 
 		dst.parent.mkdir(parents=True, exist_ok=True)
 		shutil.copy2(src, dst)
+
+		if progress_cb:
+			progress_cb(100)
+
+		logger.info(f"Snapshot file restored: {rel_path} from {snapshot_ts}")
 
 	@staticmethod
 	def restore_folder(mirror: str, ground: str, snapshot_ts: str, rel_path: str, progress_cb=None):
@@ -203,11 +217,21 @@ class SnapshotService:
 			if progress_cb:
 				percent = int((i / total) * 100)
 				progress_cb(percent)
+		
+		logger.info(f"Snapshot folder restored: {rel_path} from {snapshot_ts}")
 
 	@staticmethod
-	def export_file(mirror: str, snapshot_ts: str, rel_path: str, out_path: str):
+	def export_file(mirror: str, snapshot_ts: str, rel_path: str, out_path: str, progress_cb=None):
+		if progress_cb:
+			progress_cb(0)
+
 		src = SnapshotService.resolve_file(mirror, snapshot_ts, rel_path)
 		shutil.copy2(src, out_path)
+
+		if progress_cb:
+			progress_cb(100)
+
+		logger.info(f"Snapshot file exported: {rel_path} from {snapshot_ts} -> {out_path}")
 
 	@staticmethod
 	def export_zip(mirror: str, snapshot_ts: str, rel_path: str, out_zip: str, profile_name: str = "snapshot", progress_cb=None):
@@ -255,6 +279,8 @@ class SnapshotService:
 				f"Exported: {datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}\n"
 			)
 			zf.writestr("snapshot_info.txt", info_text)
+		
+		logger.info(f"Snapshot folder exported: {rel_path} from {snapshot_ts} -> {out_zip}")
 
 	@staticmethod
 	def list_snapshot_files(mirror: str, snapshot_ts: str):
