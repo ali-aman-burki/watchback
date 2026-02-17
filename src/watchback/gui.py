@@ -233,6 +233,30 @@ class AddProfileDialog(QDialog):
 		return profile
 
 
+class PathLinkLabel(QLabel):
+	def __init__(self, path, suffix="", parent=None):
+		super().__init__(parent)
+		self.path = path
+		self.suffix = suffix
+		self.setCursor(Qt.PointingHandCursor)
+		self.refresh_text()
+
+	def set_suffix(self, suffix):
+		self.suffix = suffix
+		self.refresh_text()
+
+	def refresh_text(self):
+		self.setText(f"{self.path}{self.suffix}")
+
+	def mousePressEvent(self, event):
+		if event.button() == Qt.LeftButton:
+			if not QDesktopServices.openUrl(QUrl.fromLocalFile(self.path)):
+				QMessageBox.warning(self, "Open failed", f"Could not open:\n{self.path}")
+			event.accept()
+			return
+		super().mousePressEvent(event)
+
+
 class ProfileWidget(QGroupBox):
 	def __init__(self, profile, parent_window):
 		super().__init__()
@@ -260,7 +284,7 @@ class ProfileWidget(QGroupBox):
 		ground = next(
 			p["path"] for p in profile["paths"] if p["role"] == "ground"
 		)
-		self.ground_path_label = QLabel(ground)
+		self.ground_path_label = PathLinkLabel(ground)
 		self.ground_path_label.setObjectName("groundPath")
 		self.ground_path_label.setWordWrap(False)
 		header_row.addWidget(self.ground_path_label)
@@ -280,7 +304,7 @@ class ProfileWidget(QGroupBox):
 		layout.addWidget(mirror_header)
 
 		for m in mirrors:
-			lbl = QLabel(f"{m}  [ IDLE ]")
+			lbl = PathLinkLabel(m, "  [ IDLE ]")
 			lbl.setObjectName("mirrorPath")
 			lbl.setWordWrap(True)
 			self.mirror_labels[m] = lbl
@@ -362,7 +386,9 @@ class ProfileWidget(QGroupBox):
 			QLabel#profileTitle { color: #f2f4f8; font-size: 14px; font-weight: 700; }
 			QLabel#sectionHeader { color: #94a3b8; font-size: 10px; text-transform: uppercase; }
 			QLabel#groundPath { color: #94a3b8; font-size: 12px; }
+			QLabel#groundPath:hover { color: #9be9a8; }
 			QLabel#mirrorPath { color: #cbd5e1; font-size: 12px; padding: 1px 0; }
+			QLabel#mirrorPath:hover { color: #9be9a8; }
 			QLabel#statsLabel { color: #b8c6da; font-size: 12px; }
 			QLabel#statusChip {
 				padding: 2px 7px;
@@ -403,7 +429,9 @@ class ProfileWidget(QGroupBox):
 			QLabel#profileTitle { color: #f2f4f8; font-size: 14px; font-weight: 700; }
 			QLabel#sectionHeader { color: #94a3b8; font-size: 10px; text-transform: uppercase; }
 			QLabel#groundPath { color: #94a3b8; font-size: 12px; }
+			QLabel#groundPath:hover { color: #9be9a8; }
 			QLabel#mirrorPath { color: #cbd5e1; font-size: 12px; padding: 1px 0; }
+			QLabel#mirrorPath:hover { color: #9be9a8; }
 			QLabel#statsLabel { color: #b8c6da; font-size: 12px; }
 			QLabel#statusChip {
 				padding: 2px 7px;
@@ -510,9 +538,7 @@ class ProfileWidget(QGroupBox):
 	def update_mirror_progress(self, path, percent):
 		if path in self.mirror_labels:
 			self.mirror_progress[path] = percent
-			self.mirror_labels[path].setText(
-				f"{path}  [ SYNCING {percent}% ]"
-			)
+			self.mirror_labels[path].set_suffix(f"  [ SYNCING {percent}% ]")
 
 	def update_mirror_status(self, path, text):
 		if path in self.mirror_labels:
@@ -527,7 +553,7 @@ class ProfileWidget(QGroupBox):
 			else:
 				label = f"[ {text} ]"
 
-			self.mirror_labels[path].setText(f"{path}  {label}")
+			self.mirror_labels[path].set_suffix(f"  {label}")
 
 	def update_status(self, text):
 		self.status_text = text
@@ -571,7 +597,7 @@ class ProfileWidget(QGroupBox):
 			self.refresh_stats_row()
 
 			for path, lbl in self.mirror_labels.items():
-				lbl.setText(f"{path}  [ SYNC STOPPED ]")
+				lbl.set_suffix("  [ SYNC STOPPED ]")
 				self.mirror_progress[path] = 0
 
 	def edit_profile(self):
