@@ -11,6 +11,18 @@ logger = logging.getLogger("watchback")
 def object_path(mirror: Path, h: str) -> Path:
     return mirror / "objects" / h[:2] / h
 
+
+class MirrorService:
+	@staticmethod
+	def is_watchback_mirror(path: str) -> bool:
+		mirror = Path(path)
+		if not mirror.exists() or not mirror.is_dir():
+			return False
+
+		layout_entries = ["current", "versions", "snapshots", "objects"]
+		present = [mirror / name for name in layout_entries]
+		return any(entry.exists() for entry in present)
+
 class FileVersionService:
 	@staticmethod
 	def list_all_versioned_files(mirror: str):
@@ -287,3 +299,109 @@ class SnapshotService:
 		mirror = Path(mirror)
 		snap = SnapshotService._load_snapshot(mirror, snapshot_ts)
 		return snap["files"]
+
+
+class CurrentService:
+	@staticmethod
+	def _current_root(mirror: Path) -> Path:
+		return mirror / "current"
+
+	@staticmethod
+	def list_current_files(mirror: str):
+		mirror = Path(mirror)
+		croot = CurrentService._current_root(mirror)
+
+		if not croot.exists():
+			return []
+
+		results = []
+		for root, _, files in os.walk(croot):
+			root_path = Path(root)
+			for name in files:
+				full = root_path / name
+				rel = full.relative_to(croot)
+				results.append(str(rel))
+
+		return sorted(results, key=str.lower)
+
+	@staticmethod
+	def _resolve_current_path(mirror: str, rel_path: str) -> Path:
+		mirror = Path(mirror)
+		croot = CurrentService._current_root(mirror)
+
+		rel = Path(rel_path) if rel_path else Path(".")
+		target = (croot / rel).resolve()
+		root_resolved = croot.resolve()
+
+		if target != root_resolved and root_resolved not in target.parents:
+			raise ValueError("Invalid current path")
+
+		if not target.exists():
+			raise FileNotFoundError("Path not found in current")
+
+		return target
+
+	@staticmethod
+	def export_current_file(mirror: str, rel_path: str, out_path: str, progress_cb=None):
+		if progress_cb:
+			progress_cb(0)
+
+		src = CurrentService._resolve_current_path(mirror, rel_path)
+		if not src.is_file():
+			raise IsADirectoryError("Selected path is not a file")
+
+		shutil.copy2(src, out_path)
+
+		if progress_cb:
+			progress_cb(100)
+
+		logger.info(f"Current file exported: {rel_path} -> {out_path}")
+
+	@staticmethod
+	def export_current_zip(
+		mirror: str,
+		rel_path: str,
+		out_zip: str,
+		profile_name: str = "current",
+		progress_cb=None
+	):
+		mirror = Path(mirror)
+		croot = CurrentService._current_root(mirror)
+
+		base = Path(rel_path) if rel_path else Path(".")
+		src_base = CurrentService._resolve_current_path(str(mirror), str(base))
+
+		if src_base.is_file():
+			targets = [src_base]
+			root_name = src_base.name
+		else:
+			targets = []
+			for root, _, files in os.walk(src_base):
+				root_path = Path(root)
+				for name in files:
+					targets.append(root_path / name)
+
+			if base in (Path("."), Path("")):
+				root_name = profile_name
+			else:
+				root_name = base.name
+
+		if not targets:
+			raise FileNotFoundError("Nothing to export")
+
+		total = len(targets)
+
+		with ZipFile(out_zip, "w", ZIP_DEFLATED) as zf:
+			for i, full in enumerate(targets, 1):
+				if src_base.is_file():
+					arcname = root_name
+				else:
+					inner = full.relative_to(src_base)
+					arcname = f"{root_name}/{inner}"
+
+				zf.write(full, arcname=arcname)
+
+				if progress_cb:
+					progress_cb(int((i / total) * 100))
+
+		logger.info(f"Current export zip created: {rel_path} -> {out_zip}")

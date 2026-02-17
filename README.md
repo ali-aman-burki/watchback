@@ -22,6 +22,19 @@ watchback
 
 That is it. While sync is running, file changes are mirrored automatically.
 
+## Open Existing Mirror (No Profile Needed)
+
+If you attach a drive that already contains a Watchback mirror, you can use it directly:
+
+1. Click `Open Mirror`
+2. Select the mirror folder
+3. Choose one of:
+- `Explore Current`
+- `Explore Versions`
+- `Explore Snapshots`
+
+You can export files from the mirror without creating a local profile first.
+
 ## What It Stores In Mirrors
 
 Each mirror gets:

@@ -1,23 +1,30 @@
 import logging
 import time
 from datetime import datetime
+from pathlib import Path
 
 from PySide6.QtWidgets import (
 	QWidget, QVBoxLayout, QPushButton, QLabel, QGroupBox,
 	QDialog, QLineEdit, QListWidget, QListWidgetItem,
 	QFileDialog, QHBoxLayout, QMessageBox,
-	QScrollArea, QFrame, QSizePolicy
+	QScrollArea, QFrame, QSizePolicy, QToolButton
 )
 from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
 
 from watchback.sync import ProfileSync
 from watchback.config import save_config, LOG_PATH
-from watchback.restore_gui import FileVersionDialog, SnapshotExplorerDialog
+from watchback.restore import MirrorService
+from watchback.restore_gui import (
+	FileVersionDialog,
+	SnapshotExplorerDialog,
+	CurrentExplorerDialog,
+)
 
 logger = logging.getLogger("watchback")
 
 SNAPSHOT_LABEL_INTERVAL = 60000
+HOME_DIR = str(Path.home())
 
 class AddProfileDialog(QDialog):
 	def __init__(self, parent=None, profile=None):
@@ -148,7 +155,11 @@ class AddProfileDialog(QDialog):
 		self.update_labels()
 
 	def add_folder(self):
-		folder = QFileDialog.getExistingDirectory(self, "Select Folder")
+		folder = QFileDialog.getExistingDirectory(
+			self,
+			"Select Folder",
+			HOME_DIR
+		)
 		if folder:
 			item = QListWidgetItem(folder)
 			self.folder_list.addItem(item)
@@ -574,10 +585,68 @@ class ProfileWidget(QGroupBox):
 
 		self.parent_window.edit_profile(self.profile)
 
+
+class MirrorToolsDialog(QDialog):
+	def __init__(self, mirror_path, parent=None):
+		super().__init__(parent)
+		self.mirror_path = mirror_path
+		self.profile_name = Path(mirror_path).name
+		self.setWindowTitle("Mirror Tools")
+		self.resize(420, 220)
+
+		layout = QVBoxLayout(self)
+
+		info = QLabel(
+			"Opened mirror:\n"
+			f"{self.mirror_path}"
+		)
+		info.setWordWrap(True)
+		layout.addWidget(info)
+
+		current_btn = QPushButton("Explore Current")
+		current_btn.clicked.connect(self.open_current)
+		layout.addWidget(current_btn)
+
+		versions_btn = QPushButton("Explore Versions")
+		versions_btn.clicked.connect(self.open_versions)
+		layout.addWidget(versions_btn)
+
+		snapshots_btn = QPushButton("Explore Snapshots")
+		snapshots_btn.clicked.connect(self.open_snapshots)
+		layout.addWidget(snapshots_btn)
+
+		close_btn = QPushButton("Close")
+		close_btn.clicked.connect(self.accept)
+		layout.addWidget(close_btn)
+
+	def open_current(self):
+		dialog = CurrentExplorerDialog(
+			self.mirror_path,
+			profile_name=self.profile_name,
+			parent=self
+		)
+		dialog.exec()
+
+	def open_versions(self):
+		dialog = FileVersionDialog(
+			mirror_path=self.mirror_path,
+			profile_name=self.profile_name,
+			parent=self
+		)
+		dialog.exec()
+
+	def open_snapshots(self):
+		dialog = SnapshotExplorerDialog(
+			mirror_path=self.mirror_path,
+			profile_name=self.profile_name,
+			parent=self
+		)
+		dialog.exec()
+
 class MainWindow(QWidget):
 	def __init__(self, config):
 		super().__init__()
-		self.setWindowTitle("Watchback - Backup Tool")
+		self.setWindowTitle("Watchback")
 		self.setMinimumSize(600, 450)
 		self.resize(720, 520)
 
@@ -603,15 +672,63 @@ class MainWindow(QWidget):
 		self.scroll.setWidget(self.scroll_container)
 
 		tools_btn_row = QHBoxLayout()
+
+		clear_log_group = QWidget()
+		clear_log_group_layout = QHBoxLayout(clear_log_group)
+		clear_log_group_layout.setContentsMargins(0, 0, 0, 0)
+		clear_log_group_layout.setSpacing(0)
+
 		self.clear_log_btn = QPushButton("Clear Log")
 		self.clear_log_btn.clicked.connect(self.clear_log)
 		self.clear_log_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-		tools_btn_row.addWidget(self.clear_log_btn)
+		self.clear_log_btn.setStyleSheet("""
+			QPushButton {
+				border-top-right-radius: 0px;
+				border-bottom-right-radius: 0px;
+			}
+		""")
+		clear_log_group_layout.addWidget(self.clear_log_btn)
 
-		self.open_location_btn = QPushButton("Open Location")
+		self.open_location_btn = QToolButton()
+		self.open_location_btn.setArrowType(Qt.RightArrow)
+		self.open_location_btn.setToolTip("Open app data location")
 		self.open_location_btn.clicked.connect(self.open_app_data_location)
-		self.open_location_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-		tools_btn_row.addWidget(self.open_location_btn)
+		self.open_location_btn.setFixedWidth(28)
+		self.open_location_btn.setStyleSheet("""
+			QToolButton {
+				background-color: #3a3a3a;
+				border: 1px solid #555555;
+				border-left: 0px;
+				border-top-right-radius: 6px;
+				border-bottom-right-radius: 6px;
+			}
+			QToolButton:hover {
+				background-color: #4a4a4a;
+			}
+			QToolButton:pressed {
+				background-color: #2a2a2a;
+			}
+		""")
+		clear_log_group_layout.addWidget(self.open_location_btn)
+
+		clear_log_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+		tools_btn_row.addWidget(clear_log_group)
+
+		self.open_mirror_btn = QPushButton("Open Mirror")
+		self.open_mirror_btn.clicked.connect(self.open_mirror)
+		self.open_mirror_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+		self.open_mirror_btn.setStyleSheet("""
+			QPushButton {
+				background-color: #2563eb;
+				border: 1px solid #2f6fef;
+				font-weight: 600;
+				color: #e7ebf3;
+			}
+			QPushButton:hover {
+				background-color: #2f6fef;
+			}
+		""")
+		tools_btn_row.addWidget(self.open_mirror_btn)
 
 		self.add_btn = QPushButton("Add Profile")
 		self.add_btn.clicked.connect(self.add_profile)
@@ -720,6 +837,27 @@ class MainWindow(QWidget):
 				self.scroll_layout.count() - 1,
 				widget
 			)
+
+	def open_mirror(self):
+		mirror = QFileDialog.getExistingDirectory(
+			self,
+			"Select Watchback mirror folder",
+			HOME_DIR
+		)
+		if not mirror:
+			return
+
+		if not MirrorService.is_watchback_mirror(mirror):
+			QMessageBox.warning(
+				self,
+				"Invalid mirror",
+				"Selected folder does not look like a Watchback mirror.\n"
+				"Expected entries such as current/, snapshots/, versions/, or objects/."
+			)
+			return
+
+		dialog = MirrorToolsDialog(mirror, self)
+		dialog.exec()
 
 
 	def edit_profile(self, profile):

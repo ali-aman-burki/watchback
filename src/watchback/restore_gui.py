@@ -6,22 +6,42 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from pathlib import Path
 
-from watchback.restore import FileVersionService, SnapshotService
+from watchback.restore import (
+	FileVersionService,
+	SnapshotService,
+	CurrentService,
+)
 from watchback.progress import run_with_progress
 
+HOME_DIR = str(Path.home())
+
 class FileVersionDialog(QDialog):
-	def __init__(self, profile, parent=None):
+	def __init__(self, profile=None, parent=None, mirror_path=None, profile_name=None):
 		super().__init__(parent)
 		self.setWindowTitle("File Version Explorer")
 		self.resize(850, 520)
 
 		self.profile = profile
-		self.ground = next(
-			p["path"] for p in profile["paths"] if p["role"] == "ground"
-		)
-		self.mirrors = [
-			p["path"] for p in profile["paths"] if p["role"] == "mirror"
-		]
+		self.profile_name = profile_name or "mirror"
+		self.ground = None
+		self.allow_restore = False
+		if profile:
+			self.profile_name = profile.get("name", self.profile_name)
+			self.ground = next(
+				p["path"] for p in profile["paths"] if p["role"] == "ground"
+			)
+			self.allow_restore = True
+			self.mirrors = [
+				p["path"] for p in profile["paths"] if p["role"] == "mirror"
+			]
+		elif mirror_path:
+			self.mirrors = [mirror_path]
+		else:
+			self.mirrors = []
+
+		if not self.mirrors:
+			raise ValueError("No mirrors available")
+
 		self.mirror = self.mirrors[0]
 
 		layout = QVBoxLayout(self)
@@ -58,6 +78,7 @@ class FileVersionDialog(QDialog):
 		self.restore_btn = QPushButton("Restore")
 		self.restore_btn.clicked.connect(self.restore_selected)
 		btn_row.addWidget(self.restore_btn)
+		self.restore_btn.setVisible(self.allow_restore)
 
 		self.export_btn = QPushButton("Export")
 		self.export_btn.clicked.connect(self.export_selected)
@@ -117,6 +138,15 @@ class FileVersionDialog(QDialog):
 			return
 
 		ts = item.text() + ".json"
+		ground = self.ground
+		if not ground:
+			ground = QFileDialog.getExistingDirectory(
+				self,
+				"Select restore destination",
+				HOME_DIR
+			)
+			if not ground:
+				return
 
 		confirm = QMessageBox.question(
 			self,
@@ -132,7 +162,7 @@ class FileVersionDialog(QDialog):
 			self,
 			FileVersionService.restore_version,
 			self.mirror,
-			self.ground,
+			ground,
 			self.current_rel_path,
 			ts
 		)
@@ -147,7 +177,7 @@ class FileVersionDialog(QDialog):
 		out_path, _ = QFileDialog.getSaveFileName(
 			self,
 			"Save version as",
-			Path(self.current_rel_path).name
+			str(Path(HOME_DIR) / Path(self.current_rel_path).name)
 		)
 
 		if not out_path:
@@ -163,18 +193,32 @@ class FileVersionDialog(QDialog):
 		)
 
 class SnapshotExplorerDialog(QDialog):
-	def __init__(self, profile, parent=None):
+	def __init__(self, profile=None, parent=None, mirror_path=None, profile_name=None):
 		super().__init__(parent)
 		self.setWindowTitle("Snapshot Explorer")
 		self.resize(850, 520)
 
 		self.profile = profile
-		self.ground = next(
-			p["path"] for p in profile["paths"] if p["role"] == "ground"
-		)
-		self.mirrors = [
-			p["path"] for p in profile["paths"] if p["role"] == "mirror"
-		]
+		self.profile_name = profile_name or "snapshot"
+		self.ground = None
+		self.allow_restore = False
+		if profile:
+			self.profile_name = profile.get("name", self.profile_name)
+			self.ground = next(
+				p["path"] for p in profile["paths"] if p["role"] == "ground"
+			)
+			self.allow_restore = True
+			self.mirrors = [
+				p["path"] for p in profile["paths"] if p["role"] == "mirror"
+			]
+		elif mirror_path:
+			self.mirrors = [mirror_path]
+		else:
+			self.mirrors = []
+
+		if not self.mirrors:
+			raise ValueError("No mirrors available")
+
 		self.mirror = self.mirrors[0]
 		self.snapshot = None
 
@@ -212,6 +256,7 @@ class SnapshotExplorerDialog(QDialog):
 		self.restore_btn = QPushButton("Restore")
 		self.restore_btn.clicked.connect(self.restore_selected)
 		btn_row.addWidget(self.restore_btn)
+		self.restore_btn.setVisible(self.allow_restore)
 
 		self.export_btn = QPushButton("Export")
 		self.export_btn.clicked.connect(self.export_selected)
@@ -319,6 +364,15 @@ class SnapshotExplorerDialog(QDialog):
 			return
 
 		rel = self.current_rel_path or ""
+		ground = self.ground
+		if not ground:
+			ground = QFileDialog.getExistingDirectory(
+				self,
+				"Select restore destination",
+				HOME_DIR
+			)
+			if not ground:
+				return
 
 		confirm = QMessageBox.question(
 			self,
@@ -335,7 +389,7 @@ class SnapshotExplorerDialog(QDialog):
 				self,
 				SnapshotService.restore_folder,
 				self.mirror,
-				self.ground,
+				ground,
 				self.snapshot,
 				rel
 			)
@@ -357,7 +411,7 @@ class SnapshotExplorerDialog(QDialog):
 			out_path, _ = QFileDialog.getSaveFileName(
 				self,
 				"Save File",
-				default_name
+				str(Path(HOME_DIR) / default_name)
 			)
 
 			if not out_path:
@@ -376,7 +430,7 @@ class SnapshotExplorerDialog(QDialog):
 			out_path, _ = QFileDialog.getSaveFileName(
 				self,
 				"Save ZIP",
-				"snapshot.zip",
+				str(Path(HOME_DIR) / "snapshot.zip"),
 				"Zip Files (*.zip)"
 			)
 
@@ -391,7 +445,126 @@ class SnapshotExplorerDialog(QDialog):
 					self.snapshot,
 					rel,
 					out_path,
-					profile_name=self.profile["name"]
+					profile_name=self.profile_name
 				)
 			except Exception as e:
 				QMessageBox.warning(self, "Error", str(e))
+
+
+class CurrentExplorerDialog(QDialog):
+	def __init__(self, mirror_path, profile_name=None, parent=None):
+		super().__init__(parent)
+		self.setWindowTitle("Current Explorer")
+		self.resize(850, 520)
+
+		self.mirror = mirror_path
+		self.profile_name = profile_name or "current"
+		self.current_rel_path = ""
+
+		layout = QVBoxLayout(self)
+		top_row = QHBoxLayout()
+		top_row.addWidget(QLabel("Mirror:"))
+		top_row.addWidget(QLabel(self.mirror))
+		top_row.addStretch()
+		layout.addLayout(top_row)
+
+		self.tree = QTreeWidget()
+		self.tree.setHeaderLabel("Current")
+		self.tree.itemClicked.connect(self.on_item_selected)
+		layout.addWidget(self.tree)
+
+		btn_row = QHBoxLayout()
+		btn_row.addStretch()
+
+		self.export_btn = QPushButton("Export")
+		self.export_btn.clicked.connect(self.export_selected)
+		btn_row.addWidget(self.export_btn)
+
+		btn_row.addStretch()
+		layout.addLayout(btn_row)
+
+		self.populate_tree()
+
+	def populate_tree(self):
+		self.tree.clear()
+
+		files = CurrentService.list_current_files(self.mirror)
+		if not files:
+			item = QTreeWidgetItem(["(no files in current)"])
+			self.tree.addTopLevelItem(item)
+			return
+
+		root = {}
+		for f in files:
+			parts = Path(f).parts
+			node = root
+			for part in parts:
+				node = node.setdefault(part, {})
+
+		def add_items(parent, structure, path=""):
+			for name, sub in structure.items():
+				rel = str(Path(path) / name) if path else name
+				item = QTreeWidgetItem([name])
+				item.setData(0, Qt.UserRole, rel)
+				parent.addChild(item)
+				if sub:
+					add_items(item, sub, rel)
+
+		root_item = QTreeWidgetItem(["/"])
+		root_item.setData(0, Qt.UserRole, "")
+		self.tree.addTopLevelItem(root_item)
+		add_items(root_item, root)
+		self.tree.expandAll()
+
+	def on_item_selected(self, item):
+		rel = item.data(0, Qt.UserRole)
+		if rel in ("", ".", "/"):
+			rel = ""
+		self.current_rel_path = rel
+
+	def export_selected(self):
+		rel = self.current_rel_path or ""
+		try:
+			selected_path = CurrentService._resolve_current_path(self.mirror, rel)
+
+			if selected_path.is_dir():
+				out_path, _ = QFileDialog.getSaveFileName(
+					self,
+					"Save ZIP",
+					str(Path(HOME_DIR) / "current.zip"),
+					"Zip Files (*.zip)"
+				)
+
+				if not out_path:
+					return
+
+				run_with_progress(
+					self,
+					CurrentService.export_current_zip,
+					self.mirror,
+					rel,
+					out_path,
+					profile_name=self.profile_name
+				)
+				return
+
+			default_name = Path(rel).name if rel else "current"
+			out_path, _ = QFileDialog.getSaveFileName(
+				self,
+				"Save File",
+				str(Path(HOME_DIR) / default_name)
+			)
+			if not out_path:
+				return
+
+			run_with_progress(
+				self,
+				CurrentService.export_current_file,
+				self.mirror,
+				rel,
+				out_path
+			)
+		except FileNotFoundError:
+			QMessageBox.warning(self, "Error", "Selected path no longer exists in current")
+		except ValueError:
+			QMessageBox.warning(self, "Error", "Invalid selection")
