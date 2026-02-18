@@ -34,10 +34,8 @@ class AddProfileDialog(QDialog):
 
 		self.layout = QVBoxLayout()
 
-		header_style = "color: #9aa0a6;"
-
 		name_label = QLabel("Profile Name")
-		name_label.setStyleSheet(header_style)
+		name_label.setObjectName("fieldHeader")
 		self.layout.addWidget(name_label)
 
 		self.name_input = QLineEdit()
@@ -45,7 +43,7 @@ class AddProfileDialog(QDialog):
 		self.layout.addWidget(self.name_input)
 
 		interval_label = QLabel("Snapshot Interval (minutes)")
-		interval_label.setStyleSheet(header_style)
+		interval_label.setObjectName("fieldHeader")
 		self.layout.addWidget(interval_label)
 
 		self.interval_input = QLineEdit()
@@ -53,7 +51,7 @@ class AddProfileDialog(QDialog):
 		self.layout.addWidget(self.interval_input)
 
 		retention_label = QLabel("Retention (days)")
-		retention_label.setStyleSheet(header_style)
+		retention_label.setObjectName("fieldHeader")
 		self.layout.addWidget(retention_label)
 
 		self.retention_input = QLineEdit()
@@ -61,7 +59,7 @@ class AddProfileDialog(QDialog):
 		self.layout.addWidget(self.retention_input)
 
 		folders_label = QLabel("Folders (Ground + Mirrors)")
-		folders_label.setStyleSheet(header_style)
+		folders_label.setObjectName("fieldHeader")
 		self.layout.addWidget(folders_label)
 
 		self.folder_list = QListWidget()
@@ -80,37 +78,18 @@ class AddProfileDialog(QDialog):
 		self.layout.addLayout(btn_row)
 
 		self.ground_label = QLabel("Double-click a folder to set as ground truth")
+		self.ground_label.setObjectName("hintLabel")
 		self.layout.addWidget(self.ground_label)
 
 		save_btn = QPushButton("Save Profile")
 		save_btn.clicked.connect(self.accept)
-		save_btn.setStyleSheet("""
-			QPushButton {
-				background-color: #2563eb;
-				border: 1px solid #2f6fef;
-				font-weight: 600;
-				color: #e7ebf3;
-			}
-			QPushButton:hover {
-				background-color: #2f6fef;
-			}
-		""")
+		save_btn.setObjectName("primaryActionBtn")
 		self.layout.addWidget(save_btn)
 
 		if profile:
 			delete_btn = QPushButton("Delete Profile")
 			delete_btn.clicked.connect(self.delete_profile)
-			delete_btn.setStyleSheet("""
-				QPushButton {
-					background-color: #b91c1c;
-					border: 1px solid #dc2626;
-					font-weight: 600;
-					color: #fef2f2;
-				}
-				QPushButton:hover {
-					background-color: #dc2626;
-				}
-			""")
+			delete_btn.setObjectName("dangerActionBtn")
 			self.layout.addWidget(delete_btn)
 
 		self.profile_to_delete = profile
@@ -269,6 +248,7 @@ class ProfileWidget(QGroupBox):
 		self.mirror_progress = {}
 		self.setTitle("")
 		self.setObjectName("profileCard")
+		self.setProperty("syncState", "idle")
 
 		layout = QVBoxLayout()
 		layout.setContentsMargins(10, 10, 10, 10)
@@ -373,88 +353,20 @@ class ProfileWidget(QGroupBox):
 	def set_running_style(self):
 		self.status_chip.setText("RUNNING")
 		self.status_chip.setProperty("state", "running")
+		self.setProperty("syncState", "running")
 		self.status_chip.style().unpolish(self.status_chip)
 		self.status_chip.style().polish(self.status_chip)
-		self.setStyleSheet("""
-			QGroupBox#profileCard {
-				background-color: #252a33;
-				border: 1px solid #404858;
-				border-left: 2px solid #3fb950;
-				border-radius: 7px;
-			}
-			QLabel { background-color: transparent; }
-			QLabel#profileTitle { color: #f2f4f8; font-size: 14px; font-weight: 700; }
-			QLabel#sectionHeader { color: #94a3b8; font-size: 10px; text-transform: uppercase; }
-			QLabel#groundPath { color: #94a3b8; font-size: 12px; }
-			QLabel#groundPath:hover { color: #9be9a8; }
-			QLabel#mirrorPath { color: #cbd5e1; font-size: 12px; padding: 1px 0; }
-			QLabel#mirrorPath:hover { color: #9be9a8; }
-			QLabel#statsLabel { color: #b8c6da; font-size: 12px; }
-			QLabel#statusChip {
-				padding: 2px 7px;
-				border-radius: 10px;
-				color: #84e1a1;
-				font-size: 10px;
-				font-weight: 700;
-			}
-			QPushButton {
-				background-color: #333a46;
-				border: 1px solid #4a5365;
-				border-radius: 6px;
-				padding: 4px 9px;
-				color: #e7ebf3;
-			}
-			QPushButton:hover { background-color: #3b4351; }
-			QPushButton#primaryBtn {
-				background-color: #2563eb;
-				border-color: #2f6fef;
-				font-weight: 600;
-			}
-			QPushButton#primaryBtn:hover { background-color: #2f6fef; }
-		""")
+		self.style().unpolish(self)
+		self.style().polish(self)
 
 	def set_idle_style(self):
 		self.status_chip.setText("IDLE")
 		self.status_chip.setProperty("state", "idle")
+		self.setProperty("syncState", "idle")
 		self.status_chip.style().unpolish(self.status_chip)
 		self.status_chip.style().polish(self.status_chip)
-		self.setStyleSheet("""
-			QGroupBox#profileCard {
-				background-color: #252a33;
-				border: 1px solid #404858;
-				border-left: 2px solid #a34a4a;
-				border-radius: 7px;
-			}
-			QLabel { background-color: transparent; }
-			QLabel#profileTitle { color: #f2f4f8; font-size: 14px; font-weight: 700; }
-			QLabel#sectionHeader { color: #94a3b8; font-size: 10px; text-transform: uppercase; }
-			QLabel#groundPath { color: #94a3b8; font-size: 12px; }
-			QLabel#groundPath:hover { color: #9be9a8; }
-			QLabel#mirrorPath { color: #cbd5e1; font-size: 12px; padding: 1px 0; }
-			QLabel#mirrorPath:hover { color: #9be9a8; }
-			QLabel#statsLabel { color: #b8c6da; font-size: 12px; }
-			QLabel#statusChip {
-				padding: 2px 7px;
-				border-radius: 10px;
-				color: #f3a8b5;
-				font-size: 10px;
-				font-weight: 700;
-			}
-			QPushButton {
-				background-color: #333a46;
-				border: 1px solid #4a5365;
-				border-radius: 6px;
-				padding: 4px 9px;
-				color: #e7ebf3;
-			}
-			QPushButton:hover { background-color: #3b4351; }
-			QPushButton#primaryBtn {
-				background-color: #2563eb;
-				border-color: #2f6fef;
-				font-weight: 600;
-			}
-			QPushButton#primaryBtn:hover { background-color: #2f6fef; }
-		""")
+		self.style().unpolish(self)
+		self.style().polish(self)
 
 	def open_snapshots(self):
 		if self.is_running:
@@ -685,11 +597,14 @@ class MainWindow(QWidget):
 		self.setLayout(main_layout)
 
 		self.scroll = QScrollArea()
+		self.scroll.setObjectName("profilesScrollArea")
 		self.scroll.setWidgetResizable(True)
 		self.scroll.setFrameShape(QFrame.NoFrame)
+		self.scroll.viewport().setObjectName("profilesScrollViewport")
 		main_layout.addWidget(self.scroll)
 
 		self.scroll_container = QWidget()
+		self.scroll_container.setObjectName("profilesScrollContent")
 		self.scroll_layout = QVBoxLayout()
 		self.scroll_layout.setAlignment(Qt.AlignTop)
 		self.scroll_layout.setSpacing(12)
@@ -705,71 +620,32 @@ class MainWindow(QWidget):
 		clear_log_group_layout.setSpacing(0)
 
 		self.clear_log_btn = QPushButton("Clear Log")
+		self.clear_log_btn.setObjectName("splitLeftBtn")
 		self.clear_log_btn.clicked.connect(self.clear_log)
 		self.clear_log_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-		self.clear_log_btn.setStyleSheet("""
-			QPushButton {
-				border-top-right-radius: 0px;
-				border-bottom-right-radius: 0px;
-			}
-		""")
 		clear_log_group_layout.addWidget(self.clear_log_btn)
 
 		self.open_location_btn = QToolButton()
+		self.open_location_btn.setObjectName("splitArrowBtn")
 		self.open_location_btn.setArrowType(Qt.RightArrow)
 		self.open_location_btn.setToolTip("Open app data location")
 		self.open_location_btn.clicked.connect(self.open_app_data_location)
 		self.open_location_btn.setFixedWidth(28)
-		self.open_location_btn.setStyleSheet("""
-			QToolButton {
-				background-color: #3a3a3a;
-				border: 1px solid #555555;
-				border-left: 0px;
-				border-top-right-radius: 6px;
-				border-bottom-right-radius: 6px;
-			}
-			QToolButton:hover {
-				background-color: #4a4a4a;
-			}
-			QToolButton:pressed {
-				background-color: #2a2a2a;
-			}
-		""")
 		clear_log_group_layout.addWidget(self.open_location_btn)
 
 		clear_log_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 		tools_btn_row.addWidget(clear_log_group)
 
 		self.open_mirror_btn = QPushButton("Open Mirror")
+		self.open_mirror_btn.setObjectName("primaryActionBtn")
 		self.open_mirror_btn.clicked.connect(self.open_mirror)
 		self.open_mirror_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-		self.open_mirror_btn.setStyleSheet("""
-			QPushButton {
-				background-color: #2563eb;
-				border: 1px solid #2f6fef;
-				font-weight: 600;
-				color: #e7ebf3;
-			}
-			QPushButton:hover {
-				background-color: #2f6fef;
-			}
-		""")
 		tools_btn_row.addWidget(self.open_mirror_btn)
 
 		self.add_btn = QPushButton("Add Profile")
+		self.add_btn.setObjectName("primaryActionBtn")
 		self.add_btn.clicked.connect(self.add_profile)
 		self.add_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-		self.add_btn.setStyleSheet("""
-			QPushButton {
-				background-color: #2563eb;
-				border: 1px solid #2f6fef;
-				font-weight: 600;
-				color: #e7ebf3;
-			}
-			QPushButton:hover {
-				background-color: #2f6fef;
-			}
-		""")
 		tools_btn_row.addWidget(self.add_btn)
 
 		main_layout.addLayout(tools_btn_row)

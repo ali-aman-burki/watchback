@@ -1,0 +1,254 @@
+QWidget {
+	background-color: #1e1e1e;
+	color: #dddddd;
+	font-size: 13px;
+}
+
+QGroupBox {
+	background-color: #2b2b2b;
+	border: 1px solid #3c3c3c;
+	border-radius: 8px;
+	margin-top: 10px;
+	padding: 10px;
+}
+
+QGroupBox::title {
+	subcontrol-origin: margin;
+	left: 10px;
+	padding: 0 3px 0 3px;
+}
+
+QPushButton {
+	background-color: #3a3a3a;
+	border: 1px solid #555555;
+	border-radius: 6px;
+	padding: 6px 12px;
+	color: #e7ebf3;
+}
+
+QPushButton:hover {
+	background-color: #4a4a4a;
+}
+
+QPushButton:pressed {
+	background-color: #2a2a2a;
+}
+
+QToolButton {
+	background-color: #3a3a3a;
+	border: 1px solid #555555;
+	border-radius: 6px;
+	color: #e7ebf3;
+}
+
+QToolButton:hover {
+	background-color: #4a4a4a;
+}
+
+QToolButton:pressed {
+	background-color: #2a2a2a;
+}
+
+QLineEdit, QListWidget {
+	background-color: #2b2b2b;
+	border: 1px solid #444444;
+	border-radius: 6px;
+	padding: 4px;
+}
+
+QLabel#fieldHeader {
+	color: #9aa0a6;
+}
+
+QLabel#hintLabel {
+	color: #9aa0a6;
+}
+
+QPushButton#primaryActionBtn {
+	background-color: #2563eb;
+	border-color: #2f6fef;
+	font-weight: 600;
+}
+
+QPushButton#primaryActionBtn:hover {
+	background-color: #2f6fef;
+}
+
+QPushButton#dangerActionBtn {
+	background-color: #b91c1c;
+	border-color: #dc2626;
+	font-weight: 600;
+	color: #fef2f2;
+}
+
+QPushButton#dangerActionBtn:hover {
+	background-color: #dc2626;
+}
+
+QToolButton#splitArrowBtn {
+	border-left: 0px;
+	border-top-left-radius: 0px;
+	border-bottom-left-radius: 0px;
+}
+
+QScrollArea#profilesScrollArea {
+	background-color: #171c24;
+	border: 1px solid #384355;
+	border-radius: 10px;
+	padding: 6px;
+}
+
+QWidget#profilesScrollViewport {
+	background-color: transparent;
+}
+
+QWidget#profilesScrollContent {
+	background-color: transparent;
+}
+
+QScrollArea#profilesScrollArea QScrollBar:vertical {
+	background: #1f2631;
+	width: 12px;
+	margin: 8px 2px 8px 0;
+	border-radius: 6px;
+}
+
+QScrollArea#profilesScrollArea QScrollBar:horizontal {
+	background: #1f2631;
+	height: 12px;
+	margin: 0 8px 2px 8px;
+	border-radius: 6px;
+}
+
+QScrollArea#profilesScrollArea QScrollBar::handle:vertical {
+	background: #4a5a73;
+	border: 1px solid #5f7291;
+	min-height: 28px;
+	border-radius: 6px;
+}
+
+QScrollArea#profilesScrollArea QScrollBar::handle:horizontal {
+	background: #4a5a73;
+	border: 1px solid #5f7291;
+	min-width: 28px;
+	border-radius: 6px;
+}
+
+QScrollArea#profilesScrollArea QScrollBar::handle:vertical:hover {
+	background: #5a6f91;
+}
+
+QScrollArea#profilesScrollArea QScrollBar::handle:horizontal:hover {
+	background: #5a6f91;
+}
+
+QScrollArea#profilesScrollArea QScrollBar::add-line:vertical,
+QScrollArea#profilesScrollArea QScrollBar::sub-line:vertical {
+	height: 0;
+}
+
+QScrollArea#profilesScrollArea QScrollBar::add-line:horizontal,
+QScrollArea#profilesScrollArea QScrollBar::sub-line:horizontal {
+	width: 0;
+}
+
+QScrollArea#profilesScrollArea QScrollBar::add-page:vertical,
+QScrollArea#profilesScrollArea QScrollBar::sub-page:vertical {
+	background: transparent;
+}
+
+QScrollArea#profilesScrollArea QScrollBar::add-page:horizontal,
+QScrollArea#profilesScrollArea QScrollBar::sub-page:horizontal {
+	background: transparent;
+}
+
+QGroupBox#profileCard {
+	background-color: #252a33;
+	border: 1px solid #404858;
+	border-radius: 7px;
+}
+
+QGroupBox#profileCard[syncState="idle"] {
+	border-left: 2px solid #a34a4a;
+}
+
+QGroupBox#profileCard[syncState="running"] {
+	border-left: 2px solid #3fb950;
+}
+
+QGroupBox#profileCard QLabel {
+	background-color: transparent;
+}
+
+QLabel#profileTitle {
+	color: #f2f4f8;
+	font-size: 14px;
+	font-weight: 700;
+}
+
+QLabel#sectionHeader {
+	color: #94a3b8;
+	font-size: 10px;
+	text-transform: uppercase;
+}
+
+QLabel#groundPath {
+	color: #94a3b8;
+	font-size: 12px;
+}
+
+QLabel#groundPath:hover {
+	color: #9be9a8;
+}
+
+QLabel#mirrorPath {
+	color: #cbd5e1;
+	font-size: 12px;
+	padding: 1px 0;
+}
+
+QLabel#mirrorPath:hover {
+	color: #9be9a8;
+}
+
+QLabel#statsLabel {
+	color: #b8c6da;
+	font-size: 12px;
+}
+
+QLabel#statusChip {
+	padding: 2px 7px;
+	border-radius: 10px;
+	font-size: 10px;
+	font-weight: 700;
+}
+
+QLabel#statusChip[state="idle"] {
+	color: #f3a8b5;
+}
+
+QLabel#statusChip[state="running"] {
+	color: #84e1a1;
+}
+
+QGroupBox#profileCard QPushButton {
+	background-color: #333a46;
+	border: 1px solid #4a5365;
+	border-radius: 6px;
+	padding: 4px 9px;
+	color: #e7ebf3;
+}
+
+QGroupBox#profileCard QPushButton:hover {
+	background-color: #3b4351;
+}
+
+QGroupBox#profileCard QPushButton#primaryBtn {
+	background-color: #2563eb;
+	border-color: #2f6fef;
+	font-weight: 600;
+}
+
+QGroupBox#profileCard QPushButton#primaryBtn:hover {
+	background-color: #2f6fef;
+}

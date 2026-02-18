@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "watchback"
-version = "0.1.1"
+version = "0.1.2"
 description = "Simple backup utility"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -22,3 +22,6 @@ watchback = "watchback.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+watchback = ["*.qss"]
