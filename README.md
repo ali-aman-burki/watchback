@@ -7,7 +7,7 @@ Simple desktop backup app: pick a source folder, pick one or more mirror folders
 
 1. Install:
 ```bash
-pip install .
+pip install watchback
 ```
 2. Run:
 ```bash

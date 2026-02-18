@@ -4,15 +4,18 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "watchback"
-version = "0.1.0"
+version = "0.1.1"
 description = "Simple backup utility"
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [
     { name = "Ali Aman", email = "ali.aman.burki@gmail.com" }
 ]
-requires-python = ">=3.11"
-dependencies = []
+requires-python = ">=3.9"
+dependencies = [
+    "PySide6>=6.0,<7.0",
+    "watchdog>=5.0,<7.0",
+]
 
 [project.scripts]
 watchback = "watchback.main:main"
