@@ -57,7 +57,7 @@ mirror/
 
 ## Requirements
 
-- Python `3.11+`
+- Python `3.9+`
 - Linux, macOS, or Windows
 
 ## License
