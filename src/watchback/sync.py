@@ -245,12 +245,15 @@ class MirrorWorker(QThread):
 	status = Signal(str, str)
 	progress = Signal(str, int)
 	finished = Signal(str)
+	initial_snapshot_done = Signal(str, float)
 
-	def __init__(self, ground: str, mirror: str):
+	def __init__(self, ground: str, mirror: str, create_initial_snapshot=False, retention_seconds=None):
 		super().__init__()
 		self.ground = Path(ground)
 		self.mirror = Path(mirror)
 		self._stop_event = threading.Event()
+		self.create_initial_snapshot = create_initial_snapshot
+		self.retention_seconds = retention_seconds
 
 	def current_root(self):
 		return self.mirror / "current"
@@ -299,6 +302,14 @@ class MirrorWorker(QThread):
 			self.sync_full()
 
 			if not self._stop_event.is_set():
+				if self.create_initial_snapshot:
+					snapshot_time = self.maybe_create_snapshot()
+					if snapshot_time is not None:
+						self.initial_snapshot_done.emit(str(self.mirror), snapshot_time)
+
+					if self.retention_seconds:
+						apply_retention(self.mirror, self.retention_seconds)
+
 				self.progress.emit(str(self.mirror), 100)
 				self.status.emit(str(self.mirror), "SYNCED")
 			else:
@@ -355,6 +366,8 @@ class MirrorWorker(QThread):
 
 			processed += 1
 			percent = int((processed / total) * 100) if total else 100
+			if percent >= 100:
+				percent = 99
 			self.progress.emit(str(self.mirror), percent)
 
 		for root, _, files in os.walk(self.current_root()):
@@ -535,6 +548,10 @@ class ProfileSync:
 			f"{age_text} (next in {next_text})"
 		)
 
+	def _on_initial_snapshot_done(self, _mirror, ts):
+		if self._set_last_snapshot_time(ts):
+			self._emit_snapshot_status()
+
 	def create_snapshots_now(self):
 		created = False
 
@@ -701,10 +718,16 @@ class ProfileSync:
 		self.workers = []
 
 		for mirror in self.mirrors():
-			worker = MirrorWorker(ground, mirror)
+			worker = MirrorWorker(
+				ground,
+				mirror,
+				create_initial_snapshot=True,
+				retention_seconds=self.profile.get("retention_seconds")
+			)
 			worker.status.connect(mirror_status_cb)
 			if progress_cb:
 				worker.progress.connect(progress_cb)
+			worker.initial_snapshot_done.connect(self._on_initial_snapshot_done)
 
 			worker.finished.connect(lambda _, w=worker: self._on_worker_finished(w))
 
@@ -720,7 +743,7 @@ class ProfileSync:
 
 		logger.info(f"Profile sync engine started: {self.profile['name']}")
 
-	def stop(self, status_cb):
+	def stop(self, status_cb, notify_snapshot_status=True):
 		self.running = False
 		self.snapshot_stop.set()
 		self.snapshot_wakeup.set()
@@ -749,7 +772,7 @@ class ProfileSync:
 		if status_cb:
 			status_cb("IDLE")
 
-		if self.snapshot_status_cb:
+		if notify_snapshot_status and self.snapshot_status_cb:
 			if self.last_snapshot_time:
 				age = int(time.time() - self.last_snapshot_time)
 				mins = age // 60

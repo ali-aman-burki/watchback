@@ -1,5 +1,6 @@
 import logging
 import time
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -9,7 +10,7 @@ from PySide6.QtWidgets import (
 	QFileDialog, QHBoxLayout, QMessageBox,
 	QScrollArea, QFrame, QSizePolicy, QToolButton
 )
-from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 
 from watchback.sync import ProfileSync
@@ -237,6 +238,9 @@ class PathLinkLabel(QLabel):
 
 
 class ProfileWidget(QGroupBox):
+	stop_completed = Signal()
+	stop_failed = Signal(str)
+
 	def __init__(self, profile, parent_window):
 		super().__init__()
 		self.profile = profile
@@ -246,6 +250,7 @@ class ProfileWidget(QGroupBox):
 			on_profile_change=self.parent_window.persist_config
 		)
 		self.mirror_progress = {}
+		self._stop_in_progress = False
 		self.setTitle("")
 		self.setObjectName("profileCard")
 		self.setProperty("syncState", "idle")
@@ -326,6 +331,9 @@ class ProfileWidget(QGroupBox):
 		self.sync_btn.setObjectName("primaryBtn")
 		self.sync_btn.clicked.connect(self.toggle_sync)
 		btn_row.addWidget(self.sync_btn)
+
+		self.stop_completed.connect(self._on_stop_completed)
+		self.stop_failed.connect(self._on_stop_failed)
 
 		self.edit_btn = QPushButton("Edit")
 		self.edit_btn.clicked.connect(self.edit_profile)
@@ -477,6 +485,8 @@ class ProfileWidget(QGroupBox):
 	def toggle_sync(self):
 		if not self.is_running:
 			self.is_running = True
+			self._stop_in_progress = False
+			self.sync_btn.setEnabled(True)
 			try:
 				self.sync.start(
 					self.update_status,
@@ -500,17 +510,51 @@ class ProfileWidget(QGroupBox):
 			self.set_running_style()
 			self.refresh_stats_row()
 		else:
-			self.sync.stop(self.update_status)
-			self.sync_btn.setText("Sync")
-			self.is_running = False
-			logger.info(f"Sync stopped for profile: {self.profile['name']}")
-			self.snapshot_timer.stop()
-			self.set_idle_style()
+			if self._stop_in_progress:
+				return
+
+			self._stop_in_progress = True
+			self.sync_btn.setText("Stopping")
+			self.sync_btn.setEnabled(False)
+			self.update_status("STOPPING")
 			self.refresh_stats_row()
 
-			for path, lbl in self.mirror_labels.items():
-				lbl.set_suffix("  [ SYNC STOPPED ]")
-				self.mirror_progress[path] = 0
+			threading.Thread(
+				target=self._stop_sync_background,
+				daemon=True
+			).start()
+
+	def _stop_sync_background(self):
+		try:
+			self.sync.stop(None, notify_snapshot_status=False)
+		except Exception as e:
+			logger.exception(f"Failed to stop sync for profile {self.profile['name']}: {e}")
+			self.stop_failed.emit(str(e))
+			return
+
+		self.stop_completed.emit()
+
+	def _on_stop_completed(self):
+		self.sync_btn.setText("Sync")
+		self.sync_btn.setEnabled(True)
+		self.is_running = False
+		self._stop_in_progress = False
+		logger.info(f"Sync stopped for profile: {self.profile['name']}")
+		self.snapshot_timer.stop()
+		self.set_idle_style()
+		self.update_status("IDLE")
+		self.refresh_stats_row()
+
+		for path, lbl in self.mirror_labels.items():
+			lbl.set_suffix("  [ SYNC STOPPED ]")
+			self.mirror_progress[path] = 0
+
+	def _on_stop_failed(self, error_text):
+		self._stop_in_progress = False
+		self.sync_btn.setText("Stop")
+		self.sync_btn.setEnabled(True)
+		self.update_status(f"ERROR: {error_text}")
+		self.refresh_stats_row()
 
 	def edit_profile(self):
 		if self.is_running:
