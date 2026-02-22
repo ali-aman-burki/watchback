@@ -15,6 +15,36 @@ from watchdog.events import FileSystemEventHandler
 
 logger = logging.getLogger("watchback")
 
+_active_sync_paths = set()
+_active_sync_paths_lock = threading.Lock()
+
+
+def try_acquire_sync_path(mirror: Path, rel_path: Path) -> bool:
+	key = (str(mirror), str(rel_path))
+	with _active_sync_paths_lock:
+		if key in _active_sync_paths:
+			return False
+		_active_sync_paths.add(key)
+		return True
+
+
+def release_sync_path(mirror: Path, rel_path: Path):
+	key = (str(mirror), str(rel_path))
+	with _active_sync_paths_lock:
+		_active_sync_paths.discard(key)
+
+
+def wait_acquire_sync_path(mirror: Path, rel_path: Path, stop_event=None) -> bool:
+	while True:
+		if try_acquire_sync_path(mirror, rel_path):
+			return True
+
+		if stop_event is not None and stop_event.is_set():
+			return False
+
+		time.sleep(0.05)
+
+
 def file_hash(path: Path, chunk_size=1024 * 1024):
 	h = hashlib.sha256()
 	with open(path, "rb") as f:
@@ -312,10 +342,16 @@ class MirrorWorker(QThread):
 			dst = self.current_root() / rel
 			dst.parent.mkdir(parents=True, exist_ok=True)
 
-			if files_differ(src, dst):
-				if dst.exists():
-					version_file(self.mirror, rel, dst)
-				shutil.copy2(src, dst)
+			if not wait_acquire_sync_path(self.mirror, rel, stop_event=self._stop_event):
+				return
+
+			try:
+				if files_differ(src, dst):
+					if dst.exists():
+						version_file(self.mirror, rel, dst)
+					shutil.copy2(src, dst)
+			finally:
+				release_sync_path(self.mirror, rel)
 
 			processed += 1
 			percent = int((processed / total) * 100) if total else 100
@@ -330,8 +366,14 @@ class MirrorWorker(QThread):
 				rel = dst.relative_to(self.current_root())
 				src = self.ground / rel
 
-				if not src.exists():
-					version_file(self.mirror, rel, dst)
+				if not wait_acquire_sync_path(self.mirror, rel, stop_event=self._stop_event):
+					return
+
+				try:
+					if not src.exists():
+						version_file(self.mirror, rel, dst)
+				finally:
+					release_sync_path(self.mirror, rel)
 
 		for root, dirs, _ in os.walk(self.current_root(), topdown=False):
 			for d in dirs:
@@ -350,6 +392,7 @@ class ChangeHandler(FileSystemEventHandler):
 		self.pending = set()
 		self.lock = threading.Lock()
 		self.timer = None
+		self.allowed_events = {"created", "modified", "deleted", "moved"}
 
 	def _flush(self):
 		with self.lock:
@@ -364,11 +407,18 @@ class ChangeHandler(FileSystemEventHandler):
 			self.trigger(p)
 
 	def on_any_event(self, event):
+		if event.event_type not in self.allowed_events:
+			return
+
 		if event.is_directory and event.event_type == "modified":
 			return
 
 		with self.lock:
 			self.pending.add(event.src_path)
+			if event.event_type == "moved":
+				dest_path = getattr(event, "dest_path", None)
+				if dest_path:
+					self.pending.add(dest_path)
 
 			if self.timer is None:
 				self.timer = threading.Timer(0.2, self._flush)
@@ -384,7 +434,10 @@ class ProfileSync:
 		self.running = False
 		self.snapshot_thread = None
 		self.snapshot_stop = threading.Event()
+		self.snapshot_wakeup = threading.Event()
 		self.snapshot_status_cb = None
+		self.handler = None
+		self.ground_path = None
 		self.last_snapshot_time = self._parse_snapshot_time(
 			profile.get("last_snapshot_time")
 		)
@@ -505,7 +558,7 @@ class ProfileSync:
 	def snapshot_loop(self):
 		while not self.snapshot_stop.is_set():
 			if not self.running:
-				time.sleep(1)
+				self.snapshot_stop.wait(1)
 				continue
 
 			now = time.time()
@@ -522,7 +575,10 @@ class ProfileSync:
 
 			sleep_for = max(1, int(next_time - now))
 
-			if self.snapshot_stop.wait(sleep_for):
+			self.snapshot_wakeup.wait(sleep_for)
+			self.snapshot_wakeup.clear()
+
+			if self.snapshot_stop.is_set():
 				break
 
 			created = False
@@ -572,6 +628,9 @@ class ProfileSync:
 			current_root.mkdir(parents=True, exist_ok=True)
 			dst = current_root / rel
 
+			if not wait_acquire_sync_path(mirror, rel, stop_event=self.snapshot_stop):
+				continue
+
 			try:
 				if src.exists():
 					if src.is_dir():
@@ -594,6 +653,8 @@ class ProfileSync:
 
 			except Exception:
 				pass
+			finally:
+				release_sync_path(mirror, rel)
 
 	def ground(self):
 		return next(p["path"] for p in self.profile["paths"] if p["role"] == "ground")
@@ -607,8 +668,18 @@ class ProfileSync:
 		worker.deleteLater()
 
 		if not self.workers and self.running:
-			self.create_snapshots_now()
 			self.start_snapshot_timer()
+			self._start_observer()
+			self.snapshot_wakeup.set()
+
+	def _start_observer(self):
+		if self.observer or not self.running or not self.ground_path:
+			return
+
+		self.handler = ChangeHandler(self.sync_single, lambda: self.running)
+		self.observer = Observer()
+		self.observer.schedule(self.handler, self.ground_path, recursive=True)
+		self.observer.start()
 
 	def start(self, status_cb, mirror_status_cb, progress_cb=None, snapshot_status_cb=None):
 		self.snapshot_status_cb = snapshot_status_cb
@@ -626,6 +697,7 @@ class ProfileSync:
 				self.snapshot_status_cb("Waiting for first snapshot")
 
 		ground = self.ground()
+		self.ground_path = ground
 		self.workers = []
 
 		for mirror in self.mirrors():
@@ -639,10 +711,10 @@ class ProfileSync:
 			worker.start()
 			self.workers.append(worker)
 
-		handler = ChangeHandler(self.sync_single, lambda: self.running)
-		self.observer = Observer()
-		self.observer.schedule(handler, ground, recursive=True)
-		self.observer.start()
+		if not self.workers:
+			self.start_snapshot_timer()
+			self._start_observer()
+			self.snapshot_wakeup.set()
 
 		status_cb("SYNCING")
 
@@ -651,20 +723,26 @@ class ProfileSync:
 	def stop(self, status_cb):
 		self.running = False
 		self.snapshot_stop.set()
+		self.snapshot_wakeup.set()
 		if self.snapshot_thread:
-			self.snapshot_thread.join(timeout=1)
+			self.snapshot_thread.join(timeout=3)
+			if self.snapshot_thread.is_alive():
+				logger.warning(f"Snapshot thread did not stop in time for profile {self.profile['name']}")
 			self.snapshot_thread = None
 
 		for w in list(self.workers):
 			w.stop()
-			w.wait()
+			if not w.wait(5000):
+				logger.warning(f"Worker did not stop in time for mirror {w.mirror}")
+				w.terminate()
+				w.wait(1000)
 
 		if self.observer:
 			obs = self.observer
 			self.observer = None
 			obs.stop()
 			try:
-				obs.join()
+				obs.join(timeout=3)
 			except RuntimeError:
 				pass
 
