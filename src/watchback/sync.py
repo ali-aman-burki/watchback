@@ -385,6 +385,7 @@ class MirrorWorker(QThread):
 				try:
 					if not src.exists():
 						version_file(self.mirror, rel, dst)
+						dst.unlink(missing_ok=True)
 				finally:
 					release_sync_path(self.mirror, rel)
 
