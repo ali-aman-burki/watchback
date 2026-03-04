@@ -70,6 +70,20 @@ def store_object(mirror: Path, src: Path) -> str:
 
 	return h
 
+
+def copy_file_atomic(src: Path, dst: Path):
+	dst.parent.mkdir(parents=True, exist_ok=True)
+	tmp = dst.parent / f".{dst.name}.watchback-tmp-{os.getpid()}-{threading.get_ident()}"
+
+	try:
+		shutil.copy2(src, tmp)
+		os.replace(tmp, dst)
+	finally:
+		try:
+			tmp.unlink(missing_ok=True)
+		except Exception:
+			pass
+
 def gc_objects(mirror: Path):
 	objects_root = mirror / "objects"
 	snapshots_root = mirror / "snapshots"
@@ -360,7 +374,7 @@ class MirrorWorker(QThread):
 				if files_differ(src, dst):
 					if dst.exists():
 						version_file(self.mirror, rel, dst)
-					shutil.copy2(src, dst)
+					copy_file_atomic(src, dst)
 			finally:
 				release_sync_path(self.mirror, rel)
 
@@ -658,8 +672,7 @@ class ProfileSync:
 							if dst.exists() and dst.is_file():
 								version_file(mirror, rel, dst)
 
-							dst.parent.mkdir(parents=True, exist_ok=True)
-							shutil.copy2(src, dst)
+							copy_file_atomic(src, dst)
 
 				else:
 					if dst.exists():
