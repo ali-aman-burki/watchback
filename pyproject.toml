@@ -24,4 +24,4 @@ watchback = "watchback.main:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-watchback = ["*.qss"]
+watchback = ["assets/*.qss", "assets/*.png", "assets/*.ico"]
