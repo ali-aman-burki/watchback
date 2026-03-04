@@ -6,12 +6,14 @@ import logging
 import hashlib
 import threading
 import tempfile
+import errno
 
 from pathlib import Path
 from datetime import datetime
 
 from PySide6.QtCore import QThread, Signal
 from watchdog.observers import Observer
+from watchdog.observers.polling import PollingObserver
 from watchdog.events import FileSystemEventHandler
 
 logger = logging.getLogger("watchback")
@@ -716,7 +718,22 @@ class ProfileSync:
 		self.handler = ChangeHandler(self.sync_single, lambda: self.running)
 		self.observer = Observer()
 		self.observer.schedule(self.handler, self.ground_path, recursive=True)
-		self.observer.start()
+		try:
+			self.observer.start()
+		except OSError as e:
+			self.observer = None
+			is_watch_limit = e.errno == errno.ENOSPC or "inotify watch limit reached" in str(e).lower()
+			if not is_watch_limit:
+				raise
+
+			logger.warning(
+				"Hit inotify watch limit for %s; falling back to polling observer. "
+				"Increase fs.inotify.max_user_watches for better performance.",
+				self.ground_path,
+			)
+			self.observer = PollingObserver()
+			self.observer.schedule(self.handler, self.ground_path, recursive=True)
+			self.observer.start()
 
 	def start(self, status_cb, mirror_status_cb, progress_cb=None, snapshot_status_cb=None):
 		self.snapshot_status_cb = snapshot_status_cb

@@ -248,6 +248,8 @@ class SnapshotExplorerDialog(QDialog):
 
 		self.tree = QTreeWidget()
 		self.tree.setHeaderLabel("Snapshot")
+		self.tree.itemClicked.connect(self.on_item_selected)
+		self.tree.itemExpanded.connect(self.on_item_expanded)
 		layout.addWidget(self.tree)
 
 		btn_row = QHBoxLayout()
@@ -268,6 +270,7 @@ class SnapshotExplorerDialog(QDialog):
 
 		self.current_rel_path = ""
 		self.view_mode = "tree"
+		self._snapshot_children_index = {}
 
 		self.load_snapshots()
 
@@ -309,6 +312,7 @@ class SnapshotExplorerDialog(QDialog):
 
 	def populate_tree(self):
 		self.tree.clear()
+		self.current_rel_path = ""
 
 		if not self.snapshot:
 			return
@@ -323,35 +327,59 @@ class SnapshotExplorerDialog(QDialog):
 				item.setData(0, Qt.UserRole, f)
 				self.tree.addTopLevelItem(item)
 
-			self.tree.itemClicked.connect(self.on_item_selected)
 			return
 
-		root = {}
-
+		self._snapshot_children_index = {}
 		for f in files:
 			parts = Path(f).parts
-			node = root
-			for part in parts:
-				node = node.setdefault(part, {})
+			for i, part in enumerate(parts):
+				parent = str(Path(*parts[:i])) if i > 0 else ""
+				is_dir = i < len(parts) - 1
+				parent_children = self._snapshot_children_index.setdefault(parent, {})
+				if part not in parent_children or is_dir:
+					parent_children[part] = is_dir
+				if is_dir:
+					dir_rel = str(Path(*parts[:i + 1]))
+					self._snapshot_children_index.setdefault(dir_rel, {})
 
-		def add_items(parent, structure, path=""):
-			for name, sub in structure.items():
-				rel = str(Path(path) / name) if path else name
-				item = QTreeWidgetItem([name])
-				item.setData(0, Qt.UserRole, rel)
-				parent.addChild(item)
-
-				if sub:
-					add_items(item, sub, rel)
+		for parent, children in list(self._snapshot_children_index.items()):
+			self._snapshot_children_index[parent] = sorted(
+				children.items(),
+				key=lambda pair: (not pair[1], pair[0].lower(), pair[0]),
+			)
 
 		root_item = QTreeWidgetItem(["/"])
 		root_item.setData(0, Qt.UserRole, "")
+		root_item.setData(0, Qt.UserRole + 1, True)
+		root_item.setData(0, Qt.UserRole + 2, False)
+		if self._snapshot_children_index.get(""):
+			root_item.addChild(QTreeWidgetItem([""]))
 		self.tree.addTopLevelItem(root_item)
+		root_item.setExpanded(True)
 
-		add_items(root_item, root)
-		self.tree.expandAll()
+	def on_item_expanded(self, item):
+		if self.view_mode != "tree":
+			return
+		if not item.data(0, Qt.UserRole + 1):
+			return
+		if item.data(0, Qt.UserRole + 2):
+			return
 
-		self.tree.itemClicked.connect(self.on_item_selected)
+		rel = item.data(0, Qt.UserRole) or ""
+		children = self._snapshot_children_index.get(rel, [])
+		item.takeChildren()
+
+		for name, is_dir in children:
+			child_rel = str(Path(rel) / name) if rel else name
+			child = QTreeWidgetItem([name])
+			child.setData(0, Qt.UserRole, child_rel)
+			child.setData(0, Qt.UserRole + 1, is_dir)
+			child.setData(0, Qt.UserRole + 2, False)
+			if is_dir and self._snapshot_children_index.get(child_rel):
+				child.addChild(QTreeWidgetItem([""]))
+			item.addChild(child)
+
+		item.setData(0, Qt.UserRole + 2, True)
 
 	def on_item_selected(self, item):
 		rel = item.data(0, Qt.UserRole)
