@@ -5,6 +5,7 @@ import shutil
 import logging
 import hashlib
 import threading
+import tempfile
 
 from pathlib import Path
 from datetime import datetime
@@ -73,7 +74,12 @@ def store_object(mirror: Path, src: Path) -> str:
 
 def copy_file_atomic(src: Path, dst: Path):
 	dst.parent.mkdir(parents=True, exist_ok=True)
-	tmp = dst.parent / f".{dst.name}.watchback-tmp-{os.getpid()}-{threading.get_ident()}"
+	fd, tmp_name = tempfile.mkstemp(
+		dir=str(dst.parent),
+		prefix=f".{dst.name}.watchback-tmp-"
+	)
+	os.close(fd)
+	tmp = Path(tmp_name)
 
 	try:
 		shutil.copy2(src, tmp)
