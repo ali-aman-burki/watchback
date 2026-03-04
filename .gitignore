@@ -44,8 +44,8 @@ celerybeat-schedule
 celerybeat.pid
 
 # IDE-specific files (optional, can be in a global gitignore)
-# .idea/  
-# .vscode/
+.idea/  
+.vscode/
 
 # Operating System files
 .DS_Store
