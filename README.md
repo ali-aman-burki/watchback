@@ -47,6 +47,19 @@ mirror/
 └── objects/    # content storage used by versions/snapshots
 ```
 
+## Build Executables (PyInstaller)
+
+Generate a standalone executable for your host OS with:
+
+```bash
+python scripts/build.py
+```
+
+The script detects the current OS and runs the correct PyInstaller command.
+
+- On Windows, output is `dist/watchback.exe`
+- On Linux, output is `dist/watchback`
+
 ## Important Notes
 
 - Sync direction is one-way: `GROUND -> MIRROR`.
