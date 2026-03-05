@@ -1,6 +1,7 @@
 import logging
 import time
 import threading
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -248,6 +249,10 @@ class ProfileWidget(QGroupBox):
 	stop_completed = Signal()
 	stop_failed = Signal(str)
 
+	@staticmethod
+	def _path_key(path: str) -> str:
+		return os.path.normcase(os.path.normpath(path))
+
 	def __init__(self, profile, parent_window):
 		super().__init__()
 		self.profile = profile
@@ -299,7 +304,7 @@ class ProfileWidget(QGroupBox):
 			lbl = PathLinkLabel(m, "  [ IDLE ]")
 			lbl.setObjectName("mirrorPath")
 			lbl.setWordWrap(True)
-			self.mirror_labels[m] = lbl
+			self.mirror_labels[self._path_key(m)] = lbl
 			layout.addWidget(lbl)
 		layout.addSpacing(6)
 
@@ -472,13 +477,15 @@ class ProfileWidget(QGroupBox):
 		)
 
 	def update_mirror_progress(self, path, percent):
-		if path in self.mirror_labels:
-			self.mirror_progress[path] = percent
-			self.mirror_labels[path].set_suffix(f"  [ SYNCING {percent}% ]")
+		key = self._path_key(path)
+		if key in self.mirror_labels:
+			self.mirror_progress[key] = percent
+			self.mirror_labels[key].set_suffix(f"  [ SYNCING {percent}% ]")
 
 	def update_mirror_status(self, path, text):
-		if path in self.mirror_labels:
-			percent = self.mirror_progress.get(path, 0)
+		key = self._path_key(path)
+		if key in self.mirror_labels:
+			percent = self.mirror_progress.get(key, 0)
 
 			if text.startswith("SYNCED"):
 				label = f"[ SYNCED {percent}% ]"
@@ -489,7 +496,7 @@ class ProfileWidget(QGroupBox):
 			else:
 				label = f"[ {text} ]"
 
-			self.mirror_labels[path].set_suffix(f"  {label}")
+			self.mirror_labels[key].set_suffix(f"  {label}")
 
 	def update_status(self, text):
 		self.status_text = text

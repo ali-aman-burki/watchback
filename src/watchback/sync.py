@@ -197,7 +197,7 @@ def build_snapshot(current_root: Path, mirror: Path, progress_cb=None):
 	for index, full in enumerate(all_files, 1):
 		rel = full.relative_to(current_root)
 		h = store_object(mirror, full)
-		files[str(rel)] = h
+		files[rel.as_posix()] = h
 
 		if progress_cb and total:
 			progress_cb(int((index / total) * 100))

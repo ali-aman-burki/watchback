@@ -2,10 +2,10 @@
 
 
 a = Analysis(
-    ['/home/ali/dev/watchback/src/watchback/main.py'],
+    ['C:\\personal\\dev\\Python\\watchback\\src\\watchback\\main.py'],
     pathex=['src'],
     binaries=[],
-    datas=[('/home/ali/dev/watchback/src/watchback/assets', 'assets')],
+    datas=[('C:\\personal\\dev\\Python\\watchback\\src\\watchback\\assets', 'assets')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -35,5 +35,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['/home/ali/dev/watchback/src/watchback/assets/wbicon.png'],
+    icon=['C:\\personal\\dev\\Python\\watchback\\src\\watchback\\assets\\wbicon.ico'],
 )

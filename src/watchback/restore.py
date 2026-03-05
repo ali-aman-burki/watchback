@@ -134,6 +134,17 @@ class FileVersionService:
 
 class SnapshotService:
 	@staticmethod
+	def _normalize_rel_path(rel_path: str) -> str:
+		return str(rel_path).replace("\\", "/").strip("/")
+
+	@staticmethod
+	def _normalized_snapshot_files(files):
+		return {
+			SnapshotService._normalize_rel_path(path): h
+			for path, h in files.items()
+		}
+
+	@staticmethod
 	def _snapshots_dir(mirror: Path) -> Path:
 		return mirror / "snapshots"
 
@@ -158,7 +169,7 @@ class SnapshotService:
 
 	@staticmethod
 	def _files_under_path(file_list, rel_path: Path):
-		rel_str = str(rel_path).replace("\\", "/").strip("/")
+		rel_str = SnapshotService._normalize_rel_path(rel_path)
 
 		if rel_str in ("", ".", "./"):
 			return file_list
@@ -172,10 +183,10 @@ class SnapshotService:
 	@staticmethod
 	def resolve_file(mirror: str, snapshot_ts: str, rel_path: str) -> Path:
 		mirror = Path(mirror)
-		rel_path = str(rel_path).replace("\\", "/")
+		rel_path = SnapshotService._normalize_rel_path(rel_path)
 
 		snap = SnapshotService._load_snapshot(mirror, snapshot_ts)
-		files = snap["files"]
+		files = SnapshotService._normalized_snapshot_files(snap["files"])
 
 		if rel_path not in files:
 			raise FileNotFoundError("File not in snapshot")
@@ -215,7 +226,7 @@ class SnapshotService:
 		rel_path = Path(rel_path)
 
 		snap = SnapshotService._load_snapshot(mirror, snapshot_ts)
-		files = snap["files"]
+		files = SnapshotService._normalized_snapshot_files(snap["files"])
 
 		targets = SnapshotService._files_under_path(files, rel_path)
 		total = max(1, len(targets))
@@ -251,7 +262,7 @@ class SnapshotService:
 		rel_path = Path(rel_path)
 
 		snap = SnapshotService._load_snapshot(mirror, snapshot_ts)
-		files = snap["files"]
+		files = SnapshotService._normalized_snapshot_files(snap["files"])
 
 		targets = SnapshotService._files_under_path(files, rel_path)
 		if not targets:
@@ -298,7 +309,7 @@ class SnapshotService:
 	def list_snapshot_files(mirror: str, snapshot_ts: str):
 		mirror = Path(mirror)
 		snap = SnapshotService._load_snapshot(mirror, snapshot_ts)
-		return snap["files"]
+		return SnapshotService._normalized_snapshot_files(snap["files"])
 
 
 class CurrentService:

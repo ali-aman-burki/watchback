@@ -330,6 +330,10 @@ class SnapshotExplorerDialog(QDialog):
 
 		self.load_snapshots()
 
+	@staticmethod
+	def _normalize_rel(rel: str) -> str:
+		return str(rel or "").replace("\\", "/").strip("/")
+
 	def toggle_view(self):
 		if self.view_mode == "tree":
 			self.view_mode = "list"
@@ -452,7 +456,7 @@ class SnapshotExplorerDialog(QDialog):
 		if item.data(0, Qt.UserRole + 2):
 			return
 
-		rel = item.data(0, Qt.UserRole) or ""
+		rel = self._normalize_rel(item.data(0, Qt.UserRole) or "")
 		files = self._snapshot_files_cache.get((self.mirror, self.snapshot))
 		if files is None:
 			item.takeChildren()
@@ -464,7 +468,7 @@ class SnapshotExplorerDialog(QDialog):
 		item.takeChildren()
 
 		for name, is_dir in children:
-			child_rel = str(Path(rel) / name) if rel else name
+			child_rel = f"{rel}/{name}" if rel else name
 			child = QTreeWidgetItem([name])
 			child.setData(0, Qt.UserRole, child_rel)
 			child.setData(0, Qt.UserRole + 1, is_dir)
@@ -538,6 +542,7 @@ class SnapshotExplorerDialog(QDialog):
 			self.populate_tree()
 
 	def _get_dir_children(self, rel: str, files):
+		rel = self._normalize_rel(rel)
 		cache_key = (self.mirror, self.snapshot, rel)
 		cached = self._snapshot_dir_children_cache.get(cache_key)
 		if cached is not None:
