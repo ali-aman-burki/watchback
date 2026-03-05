@@ -173,15 +173,34 @@ def files_differ(src: Path, dst: Path) -> bool:
 		return True
 	return False
 
-def build_snapshot(current_root: Path, mirror: Path):
+def build_snapshot(current_root: Path, mirror: Path, progress_cb=None):
 	files = {}
+	all_files = []
 
 	for root, _, filenames in os.walk(current_root):
 		for f in filenames:
 			full = Path(root) / f
-			rel = full.relative_to(current_root)
-			h = store_object(mirror, full)
-			files[str(rel)] = h
+			all_files.append(full)
+
+	total = len(all_files)
+	if progress_cb:
+		progress_cb(0)
+
+	if not total:
+		if progress_cb:
+			progress_cb(100)
+		return {
+			"timestamp": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
+			"files": files
+		}
+
+	for index, full in enumerate(all_files, 1):
+		rel = full.relative_to(current_root)
+		h = store_object(mirror, full)
+		files[str(rel)] = h
+
+		if progress_cb and total:
+			progress_cb(int((index / total) * 100))
 
 	return {
 		"timestamp": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
@@ -268,6 +287,9 @@ class MirrorWorker(QThread):
 	progress = Signal(str, int)
 	finished = Signal(str)
 	initial_snapshot_done = Signal(str, float)
+	SYNC_PROGRESS_MAX = 70
+	VERIFY_PROGRESS_MIN = 71
+	VERIFY_PROGRESS_MAX = 100
 
 	def __init__(self, ground: str, mirror: str, create_initial_snapshot=False, retention_seconds=None):
 		super().__init__()
@@ -276,6 +298,7 @@ class MirrorWorker(QThread):
 		self._stop_event = threading.Event()
 		self.create_initial_snapshot = create_initial_snapshot
 		self.retention_seconds = retention_seconds
+		self._last_progress = None
 
 	def current_root(self):
 		return self.mirror / "current"
@@ -297,7 +320,11 @@ class MirrorWorker(QThread):
 		snapshots_dir.mkdir(parents=True, exist_ok=True)
 
 		current = self.current_root()
-		snapshot = build_snapshot(current, self.mirror)
+		snapshot = build_snapshot(
+			current,
+			self.mirror,
+			progress_cb=self._emit_verify_progress
+		)
 		new_hash = snapshot_hash(snapshot)
 
 		old_hash = last_snapshot_hash(snapshots_dir)
@@ -314,12 +341,31 @@ class MirrorWorker(QThread):
 		logger.info(f"Snapshot created: {path}")
 		return path.stat().st_mtime
 
+	def _emit_progress_if_changed(self, percent: int):
+		value = max(0, min(100, int(percent)))
+		if self._last_progress == value:
+			return
+		self._last_progress = value
+		self.progress.emit(str(self.mirror), value)
+
+	def _emit_sync_progress(self, raw_percent: int):
+		raw = max(0, min(100, int(raw_percent)))
+		mapped = int((raw * self.SYNC_PROGRESS_MAX) / 100)
+		self._emit_progress_if_changed(mapped)
+
+	def _emit_verify_progress(self, raw_percent: int):
+		raw = max(0, min(100, int(raw_percent)))
+		span = self.VERIFY_PROGRESS_MAX - self.VERIFY_PROGRESS_MIN
+		mapped = self.VERIFY_PROGRESS_MIN + int((raw * span) / 100)
+		self._emit_progress_if_changed(mapped)
+
 	def stop(self):
 		self._stop_event.set()
 
 	def run(self):
 		logger.info(f"Mirror sync started: {self.mirror}")
 		try:
+			self._last_progress = None
 			self.status.emit(str(self.mirror), "SYNCING")
 			self.sync_full()
 
@@ -332,7 +378,7 @@ class MirrorWorker(QThread):
 					if self.retention_seconds:
 						apply_retention(self.mirror, self.retention_seconds)
 
-				self.progress.emit(str(self.mirror), 100)
+				self._emit_progress_if_changed(self.VERIFY_PROGRESS_MAX)
 				self.status.emit(str(self.mirror), "SYNCED")
 			else:
 				self.status.emit(str(self.mirror), "SYNCED")
@@ -388,9 +434,7 @@ class MirrorWorker(QThread):
 
 			processed += 1
 			percent = int((processed / total) * 100) if total else 100
-			if percent >= 100:
-				percent = 99
-			self.progress.emit(str(self.mirror), percent)
+			self._emit_sync_progress(percent)
 
 		for root, _, files in os.walk(self.current_root()):
 			for f in files:
