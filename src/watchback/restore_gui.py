@@ -3,8 +3,11 @@ from PySide6.QtWidgets import (
 	QListWidget, QPushButton, QHBoxLayout, QWidget,
 	QSplitter, QMessageBox, QFileDialog, QComboBox, QLabel,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from pathlib import Path
+import logging
+import queue
+import threading
 
 from watchback.restore import (
 	FileVersionService,
@@ -14,6 +17,43 @@ from watchback.restore import (
 from watchback.progress import run_with_progress
 
 HOME_DIR = str(Path.home())
+logger = logging.getLogger("watchback")
+
+
+class SnapshotFilesLoader:
+	def __init__(self, mirror: str, snapshot: str, token: int, out_queue):
+		self.mirror = mirror
+		self.snapshot = snapshot
+		self.token = token
+		self.out_queue = out_queue
+
+	def run(self):
+		try:
+			raw_files = SnapshotService.list_snapshot_files(self.mirror, self.snapshot)
+			if isinstance(raw_files, dict):
+				files = list(raw_files.keys())
+			else:
+				files = list(raw_files)
+			files.sort()
+			self.out_queue.put(
+				{
+					"token": self.token,
+					"mirror": self.mirror,
+					"snapshot": self.snapshot,
+					"files": files,
+					"error": None,
+				}
+			)
+		except Exception as e:
+			self.out_queue.put(
+				{
+					"token": self.token,
+					"mirror": self.mirror,
+					"snapshot": self.snapshot,
+					"files": None,
+					"error": str(e),
+				}
+			)
 
 class FileVersionDialog(QDialog):
 	def __init__(self, profile=None, parent=None, mirror_path=None, profile_name=None):
@@ -252,6 +292,11 @@ class SnapshotExplorerDialog(QDialog):
 		self.tree.itemExpanded.connect(self.on_item_expanded)
 		layout.addWidget(self.tree)
 
+		self.list_widget = QListWidget()
+		self.list_widget.itemClicked.connect(self.on_list_item_selected)
+		self.list_widget.hide()
+		layout.addWidget(self.list_widget)
+
 		btn_row = QHBoxLayout()
 		btn_row.addStretch()
 
@@ -270,7 +315,18 @@ class SnapshotExplorerDialog(QDialog):
 
 		self.current_rel_path = ""
 		self.view_mode = "tree"
-		self._snapshot_children_index = {}
+		self._snapshot_files_cache = {}
+		self._snapshot_load_errors = {}
+		self._snapshot_dir_children_cache = {}
+		self._snapshot_load_queue = queue.Queue()
+		self._snapshot_load_token = 0
+		self._snapshot_loads_in_flight = set()
+		self._tree_widget_key = None
+		self._list_widget_key = None
+		self._load_poll_timer = QTimer(self)
+		self._load_poll_timer.setInterval(50)
+		self._load_poll_timer.timeout.connect(self._drain_snapshot_load_queue)
+		self._load_poll_timer.start()
 
 		self.load_snapshots()
 
@@ -278,19 +334,31 @@ class SnapshotExplorerDialog(QDialog):
 		if self.view_mode == "tree":
 			self.view_mode = "list"
 			self.toggle_btn.setText("Switch to Tree View")
+			logger.info("[SnapshotExplorer] Toggle view -> list")
 		else:
 			self.view_mode = "tree"
 			self.toggle_btn.setText("Switch to List View")
+			logger.info("[SnapshotExplorer] Toggle view -> tree")
 
+		self._apply_view_visibility()
 		self.populate_tree()
 
 	def load_snapshots(self):
 		snaps = SnapshotService.list_snapshots(self.mirror)
+		self.snapshot_combo.blockSignals(True)
 		self.snapshot_combo.clear()
+		self._tree_widget_key = None
+		self._list_widget_key = None
+		self.tree.clear()
+		self.list_widget.clear()
+		logger.info(f"[SnapshotExplorer] Loading snapshots for mirror: {self.mirror}")
 
 		if not snaps:
 			self.snapshot_combo.addItem("(no snapshots)")
-			self.tree.clear()
+			self.snapshot_combo.blockSignals(False)
+			self.snapshot = None
+			self._apply_view_visibility()
+			logger.info("[SnapshotExplorer] No snapshots found")
 			return
 
 		for s in snaps:
@@ -298,63 +366,82 @@ class SnapshotExplorerDialog(QDialog):
 
 		self.snapshot = snaps[-1]
 		self.snapshot_combo.setCurrentText(self.snapshot)
+		self.snapshot_combo.blockSignals(False)
+		logger.info(f"[SnapshotExplorer] Loaded {len(snaps)} snapshots, default={self.snapshot}")
+		self._apply_view_visibility()
 		self.populate_tree()
 
 	def on_mirror_changed(self, text):
 		self.mirror = text
+		logger.info(f"[SnapshotExplorer] Mirror changed -> {self.mirror}")
 		self.load_snapshots()
 
 	def on_snapshot_changed(self, text):
 		if text == "(no snapshots)":
+			self.snapshot = None
+			self.tree.clear()
+			self.list_widget.clear()
+			self._tree_widget_key = None
+			self._list_widget_key = None
+			logger.info("[SnapshotExplorer] Snapshot changed -> none")
 			return
 		self.snapshot = text
+		self.current_rel_path = ""
+		self._tree_widget_key = None
+		self._list_widget_key = None
+		self.tree.clear()
+		self.list_widget.clear()
+		logger.info(f"[SnapshotExplorer] Snapshot changed -> {self.snapshot}")
 		self.populate_tree()
 
 	def populate_tree(self):
-		self.tree.clear()
-		self.current_rel_path = ""
-
 		if not self.snapshot:
+			logger.info("[SnapshotExplorer] populate_tree skipped (no snapshot)")
 			return
 
-		files = SnapshotService.list_snapshot_files(
-			self.mirror, self.snapshot
-		)
+		key = (self.mirror, self.snapshot)
+		files = self._snapshot_files_cache.get(key)
+		if files is None:
+			err = self._snapshot_load_errors.get(key)
+			if err:
+				if self.view_mode == "list":
+					self.list_widget.clear()
+					self.list_widget.addItem(f"Error: {err}")
+				else:
+					self.tree.clear()
+					self.tree.addTopLevelItem(QTreeWidgetItem([f"Error: {err}"]))
+				logger.info(f"[SnapshotExplorer] Snapshot load error for {key}: {err}")
+				return
+			self._set_loading_state()
+			self._load_snapshot_files_async(self.mirror, self.snapshot)
+			logger.info(f"[SnapshotExplorer] Cache miss for files {key}; loading async")
+			return
 
 		if self.view_mode == "list":
-			for f in sorted(files):
-				item = QTreeWidgetItem([f])
-				item.setData(0, Qt.UserRole, f)
-				self.tree.addTopLevelItem(item)
+			if self._list_widget_key == key:
+				logger.info(f"[SnapshotExplorer] Reusing cached list widget for {key}")
+				return
+			self.list_widget.clear()
+			for f in files:
+				self.list_widget.addItem(f)
+			self._list_widget_key = key
+			logger.info(f"[SnapshotExplorer] Built list widget for {key} ({len(files)} files)")
 
 			return
 
-		self._snapshot_children_index = {}
-		for f in files:
-			parts = Path(f).parts
-			for i, part in enumerate(parts):
-				parent = str(Path(*parts[:i])) if i > 0 else ""
-				is_dir = i < len(parts) - 1
-				parent_children = self._snapshot_children_index.setdefault(parent, {})
-				if part not in parent_children or is_dir:
-					parent_children[part] = is_dir
-				if is_dir:
-					dir_rel = str(Path(*parts[:i + 1]))
-					self._snapshot_children_index.setdefault(dir_rel, {})
+		if self._tree_widget_key == key:
+			logger.info(f"[SnapshotExplorer] Reusing cached tree widget for {key}")
+			return
 
-		for parent, children in list(self._snapshot_children_index.items()):
-			self._snapshot_children_index[parent] = sorted(
-				children.items(),
-				key=lambda pair: (not pair[1], pair[0].lower(), pair[0]),
-			)
-
+		self.tree.clear()
 		root_item = QTreeWidgetItem(["/"])
 		root_item.setData(0, Qt.UserRole, "")
 		root_item.setData(0, Qt.UserRole + 1, True)
 		root_item.setData(0, Qt.UserRole + 2, False)
-		if self._snapshot_children_index.get(""):
-			root_item.addChild(QTreeWidgetItem([""]))
+		root_item.addChild(QTreeWidgetItem([""]))
 		self.tree.addTopLevelItem(root_item)
+		self._tree_widget_key = key
+		logger.info(f"[SnapshotExplorer] Built tree root for {key}")
 		root_item.setExpanded(True)
 
 	def on_item_expanded(self, item):
@@ -366,7 +453,14 @@ class SnapshotExplorerDialog(QDialog):
 			return
 
 		rel = item.data(0, Qt.UserRole) or ""
-		children = self._snapshot_children_index.get(rel, [])
+		files = self._snapshot_files_cache.get((self.mirror, self.snapshot))
+		if files is None:
+			item.takeChildren()
+			item.addChild(QTreeWidgetItem(["Loading..."]))
+			self._load_snapshot_files_async(self.mirror, self.snapshot)
+			return
+
+		children = self._get_dir_children(rel, files)
 		item.takeChildren()
 
 		for name, is_dir in children:
@@ -375,14 +469,144 @@ class SnapshotExplorerDialog(QDialog):
 			child.setData(0, Qt.UserRole, child_rel)
 			child.setData(0, Qt.UserRole + 1, is_dir)
 			child.setData(0, Qt.UserRole + 2, False)
-			if is_dir and self._snapshot_children_index.get(child_rel):
+			if is_dir:
 				child.addChild(QTreeWidgetItem([""]))
 			item.addChild(child)
 
 		item.setData(0, Qt.UserRole + 2, True)
 
+	def _apply_view_visibility(self):
+		is_tree = self.view_mode == "tree"
+		self.tree.setVisible(is_tree)
+		self.list_widget.setVisible(not is_tree)
+
+	def _set_loading_state(self):
+		if self.view_mode == "list":
+			self.list_widget.clear()
+			self.list_widget.addItem("Loading snapshot...")
+		else:
+			self.tree.clear()
+			item = QTreeWidgetItem(["Loading snapshot..."])
+			item.setData(0, Qt.UserRole, None)
+			item.setData(0, Qt.UserRole + 1, False)
+			item.setData(0, Qt.UserRole + 2, True)
+			self.tree.addTopLevelItem(item)
+
+	def _load_snapshot_files_async(self, mirror: str, snapshot: str):
+		key = (mirror, snapshot)
+		if key in self._snapshot_loads_in_flight:
+			logger.info(f"[SnapshotExplorer] Async load already in flight for {key}")
+			return
+
+		self._snapshot_load_token += 1
+		token = self._snapshot_load_token
+		self._snapshot_loads_in_flight.add(key)
+		logger.info(f"[SnapshotExplorer] Async load start for {key}, token={token}")
+
+		loader = SnapshotFilesLoader(mirror, snapshot, token, self._snapshot_load_queue)
+		threading.Thread(target=loader.run, daemon=True).start()
+
+	def _drain_snapshot_load_queue(self):
+		updated_current = False
+		while True:
+			try:
+				msg = self._snapshot_load_queue.get_nowait()
+			except queue.Empty:
+				break
+
+			key = (msg["mirror"], msg["snapshot"])
+			self._snapshot_loads_in_flight.discard(key)
+
+			if msg["error"] is None and msg["files"] is not None:
+				self._snapshot_files_cache[key] = msg["files"]
+				self._snapshot_load_errors.pop(key, None)
+				logger.info(
+					f"[SnapshotExplorer] Async load complete for {key}: "
+					f"{len(msg['files'])} files cached"
+				)
+			elif msg["error"] is not None:
+				self._snapshot_load_errors[key] = msg["error"]
+				logger.info(f"[SnapshotExplorer] Async load failed for {key}: {msg['error']}")
+
+			if (
+				msg["token"] == self._snapshot_load_token
+				and key == (self.mirror, self.snapshot)
+			):
+				updated_current = True
+
+		if updated_current:
+			self.populate_tree()
+
+	def _get_dir_children(self, rel: str, files):
+		cache_key = (self.mirror, self.snapshot, rel)
+		cached = self._snapshot_dir_children_cache.get(cache_key)
+		if cached is not None:
+			logger.info(
+				f"[SnapshotExplorer] Dir cache hit for "
+				f"{(self.mirror, self.snapshot, rel)} ({len(cached)} children)"
+			)
+			return cached
+
+		prefix = f"{rel}/" if rel else ""
+		children_map = {}
+		for f in files:
+			if rel:
+				if not f.startswith(prefix):
+					continue
+				tail = f[len(prefix):]
+			else:
+				tail = f
+
+			if not tail:
+				continue
+
+			part, has_sep, _rest = tail.partition("/")
+			if not part:
+				continue
+
+			is_dir = bool(has_sep)
+			if part not in children_map or is_dir:
+				children_map[part] = is_dir
+
+		children = sorted(
+			children_map.items(),
+			key=lambda pair: (not pair[1], pair[0].lower(), pair[0]),
+		)
+		self._snapshot_dir_children_cache[cache_key] = children
+		logger.info(
+			f"[SnapshotExplorer] Dir cache miss for "
+			f"{(self.mirror, self.snapshot, rel)} -> cached {len(children)} children"
+		)
+		return children
+
+	def closeEvent(self, event):
+		total_file_entries = sum(len(v) for v in self._snapshot_files_cache.values())
+		logger.info(
+			"[SnapshotExplorer] Closing dialog; clearing caches: "
+			f"snapshot_keys={len(self._snapshot_files_cache)}, "
+			f"file_entries={total_file_entries}, "
+			f"dir_entries={len(self._snapshot_dir_children_cache)}, "
+			f"in_flight={len(self._snapshot_loads_in_flight)}"
+		)
+		self._load_poll_timer.stop()
+		self._snapshot_load_token += 1
+		self._snapshot_loads_in_flight.clear()
+		self._snapshot_files_cache.clear()
+		self._snapshot_load_errors.clear()
+		self._snapshot_dir_children_cache.clear()
+		self._tree_widget_key = None
+		self._list_widget_key = None
+		logger.info("[SnapshotExplorer] Cache clear complete")
+		super().closeEvent(event)
+
 	def on_item_selected(self, item):
 		rel = item.data(0, Qt.UserRole)
+		if rel in ("", ".", "/"):
+			rel = ""
+		self.current_rel_path = rel
+
+	def on_list_item_selected(self, item):
+		rel = item.text().strip()
 		if rel in ("", ".", "/"):
 			rel = ""
 		self.current_rel_path = rel
