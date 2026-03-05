@@ -518,6 +518,7 @@ class ProfileSync:
 		self.snapshot_status_cb = None
 		self.handler = None
 		self.ground_path = None
+		self.live_versioning = profile["live_versioning"]
 		self.last_snapshot_time = self._parse_snapshot_time(
 			profile.get("last_snapshot_time")
 		)
@@ -752,7 +753,8 @@ class ProfileSync:
 
 		if not self.workers and self.running:
 			self.start_snapshot_timer()
-			self._start_observer()
+			if self.live_versioning:
+				self._start_observer()
 			self.snapshot_wakeup.set()
 
 	def _start_observer(self):
@@ -817,7 +819,8 @@ class ProfileSync:
 
 		if not self.workers:
 			self.start_snapshot_timer()
-			self._start_observer()
+			if self.live_versioning:
+				self._start_observer()
 			self.snapshot_wakeup.set()
 
 		status_cb("SYNCING")

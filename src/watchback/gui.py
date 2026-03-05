@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
 	QWidget, QVBoxLayout, QPushButton, QLabel, QGroupBox,
 	QDialog, QLineEdit, QListWidget, QListWidgetItem,
 	QFileDialog, QHBoxLayout, QMessageBox,
-	QScrollArea, QFrame, QSizePolicy, QToolButton
+	QScrollArea, QFrame, QSizePolicy, QToolButton, QCheckBox
 )
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
@@ -58,6 +58,11 @@ class AddProfileDialog(QDialog):
 		self.retention_input = QLineEdit()
 		self.retention_input.setPlaceholderText("Empty = unlimited")
 		self.layout.addWidget(self.retention_input)
+
+		self.live_versioning_checkbox = QCheckBox("Enable live versioning")
+		self.live_versioning_checkbox.setObjectName("liveVersioningCheckbox")
+		self.live_versioning_checkbox.setChecked(True)
+		self.layout.addWidget(self.live_versioning_checkbox)
 
 		folders_label = QLabel("Folders (Ground + Mirrors)")
 		folders_label.setObjectName("fieldHeader")
@@ -126,6 +131,7 @@ class AddProfileDialog(QDialog):
 		if ret:
 			days = ret / 86400
 			self.retention_input.setText(str(round(days, 3)).rstrip("0").rstrip("."))
+		self.live_versioning_checkbox.setChecked(profile["live_versioning"])
 
 		for i, p in enumerate(profile["paths"]):
 			item = QListWidgetItem(p["path"])
@@ -204,6 +210,7 @@ class AddProfileDialog(QDialog):
 		profile = {
 			"name": name,
 			"snapshot_interval": interval,
+			"live_versioning": self.live_versioning_checkbox.isChecked(),
 			"paths": paths
 		}
 
@@ -316,6 +323,7 @@ class ProfileWidget(QGroupBox):
 			self.retention_text = "Unlimited"
 
 		self.status_text = "IDLE"
+		self.live_versioning_enabled = profile["live_versioning"]
 		stats_header = QLabel("Stats")
 		stats_header.setObjectName("sectionHeader")
 		layout.addWidget(stats_header)
@@ -444,6 +452,13 @@ class ProfileWidget(QGroupBox):
 		else:
 			next_text = "-"
 
+		live_versioning_fragment = ""
+		if self.live_versioning_enabled:
+			live_versioning_fragment = (
+				'&nbsp;&nbsp;<span style="color: #e7ebf3; font-weight: 700;">•</span>&nbsp;&nbsp;'
+				"<span>Live Versioning: On</span>"
+			)
+
 		self.stats_label.setText(
 			"&nbsp;<span>Snapshot Frequency: "
 			f"{self.interval_text}</span>"
@@ -453,6 +468,7 @@ class ProfileWidget(QGroupBox):
 			f"<span>Next Snapshot: {next_text}</span>"
 			'&nbsp;&nbsp;<span style="color: #e7ebf3; font-weight: 700;">•</span>&nbsp;&nbsp;'
 			f"<span>Retention: {self.retention_text}</span>"
+			f"{live_versioning_fragment}"
 		)
 
 	def update_mirror_progress(self, path, percent):
@@ -629,8 +645,8 @@ class MainWindow(QWidget):
 	def __init__(self, config):
 		super().__init__()
 		self.setWindowTitle("Watchback")
-		self.setMinimumSize(600, 450)
-		self.resize(720, 520)
+		self.setMinimumSize(770, 600)
+		self.resize(770, 600)
 
 		self.config = config
 		self.profile_widgets = []
